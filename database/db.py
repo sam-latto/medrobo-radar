@@ -138,17 +138,14 @@ def get_all_events(
     return [dict(r) for r in rows]
 
 
-def get_notable_events(run_id: str = None) -> list[dict]:
-    if run_id:
-        clause = "WHERE is_notable = 1 AND run_id = ?"
-        params = [run_id]
-    else:
-        clause = "WHERE is_notable = 1"
-        params = []
+def get_notable_events() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT * FROM events {clause} ORDER BY created_at DESC LIMIT 50",
-            params,
+            """SELECT * FROM events
+               WHERE is_notable = 1
+                 AND date >= date('now', '-7 days')
+               ORDER BY date ASC, created_at ASC
+               LIMIT 50""",
         ).fetchall()
     return [dict(r) for r in rows]
 

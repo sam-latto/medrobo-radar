@@ -1,7 +1,7 @@
 import uuid
 import logging
 from datetime import date
-from database.db import init_db, insert_run, update_run, insert_event
+from database.db import init_db, insert_run, update_run, insert_event, get_all_runs
 from pipeline.search_agent import run_search_agent
 from pipeline.extraction_agent import run_extraction_agent
 from pipeline.synthesis_agent import run_synthesis_agent
@@ -10,12 +10,23 @@ from email_digest.sender import send_digest
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(triggered_by: str = "schedule") -> dict:
+def _already_ran_today() -> bool:
+    runs = get_all_runs()
+    today = date.today().isoformat()
+    return any(r["run_date"] == today and r["status"] == "complete" for r in runs)
+
+
+def run_pipeline(triggered_by: str = "schedule", force: bool = False) -> dict:
     """Run the full research pipeline. Returns a summary dict."""
     init_db()
 
-    run_id = str(uuid.uuid4())
     run_date = date.today().isoformat()
+
+    if not force and _already_ran_today():
+        logger.info("Pipeline already completed today — skipping")
+        return {"run_id": None, "events": 0, "notable": 0, "status": "skipped"}
+
+    run_id = str(uuid.uuid4())
     insert_run(run_id, run_date, triggered_by)
     logger.info(f"Pipeline run {run_id} started (triggered_by={triggered_by})")
 

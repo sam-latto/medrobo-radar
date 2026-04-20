@@ -64,18 +64,49 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("▶ Run Pipeline Now", use_container_width=True, type="primary"):
-        with st.spinner("Running pipeline…"):
-            try:
-                from pipeline.pipeline import run_pipeline
-                result = run_pipeline(triggered_by="manual")
-                if result["status"] == "complete":
-                    st.success(f"Done! {result['events']} events, {result['notable']} notable")
-                else:
-                    st.error(f"Pipeline failed: {result.get('error', 'unknown error')}")
+    today_complete = latest_run and latest_run.get("run_date") == date.today().isoformat() and latest_run.get("status") == "complete"
+
+    if "confirm_rerun" not in st.session_state:
+        st.session_state.confirm_rerun = False
+
+    if not st.session_state.confirm_rerun:
+        if st.button("▶ Run Pipeline Now", use_container_width=True, type="primary"):
+            if today_complete:
+                st.session_state.confirm_rerun = True
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
+            else:
+                with st.spinner("Running pipeline…"):
+                    try:
+                        from pipeline.pipeline import run_pipeline
+                        result = run_pipeline(triggered_by="manual", force=True)
+                        if result["status"] == "complete":
+                            st.success(f"Done! {result['events']} events, {result['notable']} notable")
+                        else:
+                            st.error(f"Pipeline failed: {result.get('error', 'unknown error')}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+    else:
+        st.warning("Today's briefing has already been created. Regenerate?")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Yes, regenerate", use_container_width=True, type="primary"):
+                st.session_state.confirm_rerun = False
+                with st.spinner("Running pipeline…"):
+                    try:
+                        from pipeline.pipeline import run_pipeline
+                        result = run_pipeline(triggered_by="manual", force=True)
+                        if result["status"] == "complete":
+                            st.success(f"Done! {result['events']} events, {result['notable']} notable")
+                        else:
+                            st.error(f"Pipeline failed: {result.get('error', 'unknown error')}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+        with col2:
+            if st.button("Cancel", use_container_width=True):
+                st.session_state.confirm_rerun = False
+                st.rerun()
 
     st.divider()
     runs = get_all_runs()
@@ -162,13 +193,7 @@ with tab1:
 with tab2:
     st.header("Notable Events")
 
-    run_filter = None
-    if latest_run:
-        show_latest_only = st.checkbox("This run only", value=True)
-        if show_latest_only:
-            run_filter = latest_run["id"]
-
-    notable = get_notable_events(run_id=run_filter)
+    notable = get_notable_events()
 
     if not notable:
         st.info("No notable events flagged yet.")
@@ -201,21 +226,18 @@ with tab2:
             fda = e.get("fda_status")
 
             with st.container():
-                st.markdown(
-                    f"""<div style="border-left:4px solid {color};padding:12px 20px;margin:8px 0;
-                        background:#f8fafc;border-radius:0 8px 8px 0;">
-                        <span style="background:{color};color:white;padding:2px 10px;border-radius:4px;
-                            font-size:12px;font-weight:bold;">{icon} {event_type.upper()}</span>
-                        <span style="color:#64748b;font-size:13px;margin-left:12px;">{ev_date}</span>
-                        <p style="margin:8px 0;font-size:16px;font-weight:600;">{company}
-                            {f'— {product}' if product else ''}</p>
-                        <p style="margin:4px 0;color:#334155;">{summary}
-                            {f'<strong> · ${funding:,.0f}</strong>' if funding else ''}
-                            {f'<strong> · {fda}</strong>' if fda else ''}
-                        </p>
-                    </div>""",
-                    unsafe_allow_html=True,
+                product_str = f"— {product}" if product else ""
+                funding_str = f"<strong> · ${funding:,.0f}</strong>" if funding else ""
+                fda_str = f"<strong> · {fda}</strong>" if fda else ""
+                html = (
+                    f'<div style="border-left:4px solid {color};padding:12px 20px;margin:8px 0;background:#f8fafc;border-radius:0 8px 8px 0;">'
+                    f'<span style="background:{color};color:white;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:bold;">{icon} {event_type.upper()}</span>'
+                    f'<span style="color:#64748b;font-size:13px;margin-left:12px;">{ev_date}</span>'
+                    f'<p style="margin:8px 0;font-size:16px;font-weight:600;">{company} {product_str}</p>'
+                    f'<p style="margin:4px 0;color:#334155;">{summary}{funding_str}{fda_str}</p>'
+                    f'</div>'
                 )
+                st.markdown(html, unsafe_allow_html=True)
                 if url:
                     st.markdown(f"[Read source →]({url})")
                 st.write("")
@@ -223,25 +245,25 @@ with tab2:
 
 # ── Tab 3: Written Briefing ───────────────────────────────────────────────────
 with tab3:
-    st.header("Daily Briefing")
+    all_runs = get_all_runs()
+    completed_runs = [r for r in all_runs if r.get("status") == "complete" and r.get("briefing_text")]
 
-    if latest_run and latest_run.get("briefing_text"):
-        run_info = f"Run date: **{latest_run['run_date']}** · Status: **{latest_run['status']}**"
-        if latest_run.get("completed_at"):
-            run_info += f" · Completed: {latest_run['completed_at']}"
-        st.caption(run_info)
-        st.divider()
-        st.markdown(latest_run["briefing_text"])
-    else:
+    if not completed_runs:
         st.info("No briefing available yet. Run the pipeline to generate a briefing.")
+    else:
+        # Most recent briefing at the top
+        current = completed_runs[0]
+        st.subheader(f"Today's Briefing — {current['run_date']}")
+        st.caption(f"Completed: {current.get('completed_at', '—')} · Triggered by: {current.get('triggered_by', '—')}")
+        st.divider()
+        st.markdown(current["briefing_text"])
 
-    st.divider()
-    with st.expander("Previous runs"):
-        all_runs = get_all_runs()
-        if all_runs:
-            for run in all_runs[1:]:
-                if run.get("briefing_text"):
-                    with st.expander(f"{run['run_date']} ({run['triggered_by']})"):
-                        st.markdown(run["briefing_text"])
-        else:
-            st.caption("No previous runs.")
+        # Previous briefings
+        past_runs = completed_runs[1:]
+        if past_runs:
+            st.divider()
+            st.subheader("Previous Briefings")
+            for run in past_runs:
+                with st.expander(run["run_date"]):
+                    st.markdown(run["briefing_text"])
+
