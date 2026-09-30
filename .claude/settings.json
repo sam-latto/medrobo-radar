@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(gh *)",
+      "Bash(gh.exe *)",
+      "PowerShell(gh *)",
+      "PowerShell(gh.exe *)"
+    ]
+  }
+}
