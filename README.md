@@ -1,72 +1,94 @@
-# MedRobo Radar
+# Industry Radar
 
-An autonomous AI agent pipeline that searches, extracts, and synthesizes healthcare robotics intelligence into a daily briefing and interactive dashboard for investors and analysts.
+An autonomous AI agent pipeline that tracks any industry: it collects news and primary-source data, extracts structured events, writes a daily briefing, ranks companies by momentum, and answers plain-English questions over everything it has collected.
+
+It started as **MedRobo Radar** (healthcare robotics), which is now the first of several industry profiles.
 
 ## Architecture
 
 ```
-Search Agent → Extraction Agent → Synthesis Agent → Dashboard + Email
-  (Tavily)      (Claude tool use)   (Claude prose)    (Streamlit)
+            ┌─ Tavily web search ─┐
+Profiles →  ├─ openFDA 510(k)     ├→ Extraction Agent → Company resolution → Synthesis Agent → Dashboard + Email
+ (YAML)     ├─ SEC Form D         │   (Claude, batched)   (companies table)    (Claude briefing)
+            ├─ PubMed / arXiv     │
+            └─ ClinicalTrials.gov ┘
+                                                   Ask Agent (Claude tool loop, read-only SQL tools) ─→ 💬 Ask tab
 ```
 
-Three sequential agents:
-1. **Search Agent** — queries Tavily across event types × sub-segments, deduplicates against the database
-2. **Extraction Agent** — calls Claude with tool use to extract structured fields from each result
-3. **Synthesis Agent** — generates a narrative briefing and flags high-signal notable events
+1. **Sources** (`sources/`) — plug-ins listed under `sources:` in each profile. Primary sources (FDA, SEC, research databases) pre-fill authoritative fields such as the FDA decision or the amount sold in a Form D.
+2. **Extraction Agent** — one Claude call per batch of ~15 results, with the tool schema's enums built from the profile.
+3. **Company resolution** — links each event to a `companies` row (exact normalized match, or Claude confirms near-matches).
+4. **Synthesis Agent** — writes the briefing via tool use and flags notable events using the profile's rules. Primary sources are treated as authoritative over news.
+5. **Ask Agent** — answers questions with parameterized read-only tools (`search_events`, `aggregate_events`, `get_briefings`, `get_company`) and cites event ids.
 
 ## Setup
 
 ```bash
-# 1. Clone and install
 pip install -r requirements.txt
+cp .env.example .env        # add your API keys
 
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your API keys
-
-# 3. Launch (scheduler + dashboard)
-python main.py
-
-# Dashboard only
-streamlit run dashboard/app.py
-
-# Run pipeline once manually
-python main.py run
+python main.py              # scheduler + Streamlit dashboard
+streamlit run dashboard/app.py   # dashboard only
+python main.py run          # run every active profile once
 ```
 
-## Environment Variables
+## CLI
+
+| Command | What it does |
+|---|---|
+| `python main.py run [profile_id] [--force]` | Run the pipeline once (all active profiles by default; `--force` re-runs profiles that already ran today) |
+| `python main.py new-profile "battery storage"` | Have Claude draft a new industry profile, saved inactive for review |
+| `python main.py profiles` | List profiles |
+| `python main.py backfill-companies` | Link existing events to company records |
+| `python main.py scheduler` | Run only the daily scheduler |
+
+## Industry profiles
+
+Each industry is one YAML file in `profiles/` (see `profiles/healthcare_robotics.yaml`): segments, event types, search queries (with a `{segment}` placeholder and no years), notable-event rules, sources, watchlist, momentum weights and briefing audience. Three ship with the app: healthcare robotics, physical AI and industrial automation.
+
+Create one from the dashboard (sidebar → ➕ New industry → review the YAML → **Save & activate**) or with `new-profile`.
+
+## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
 | `TAVILY_API_KEY` | Yes | Tavily search API key |
-| `EMAIL_FROM` | No | Sender address for digest |
-| `EMAIL_TO` | No | Recipient address for digest |
-| `SENDGRID_API_KEY` | No | SendGrid transport (preferred) |
-| `SMTP_HOST/PORT/USER/PASSWORD` | No | SMTP transport (fallback) |
-| `PIPELINE_SCHEDULE_HOUR` | No | Hour for daily run (default: 7) |
-| `NOTABLE_FUNDING_THRESHOLD` | No | USD threshold for notable funding (default: 50000000) |
+| `ANTHROPIC_MODEL` | No | Claude model (default `claude-sonnet-4-6`) |
+| `SEC_USER_AGENT` | For SEC | SEC requires a descriptive User-Agent with a contact email, e.g. `IndustryRadar you@example.com`. The Form D source is skipped without it. |
+| `OPENFDA_API_KEY`, `NCBI_API_KEY` | No | Optional keys that raise openFDA / PubMed rate limits |
+| `SEARCH_TIME_RANGE` | No | Tavily recency filter: `day`, `week` (default), `month`, `year` |
+| `EXTRACTION_BATCH_SIZE` | No | Search results per extraction call (default 15) |
+| `DIGEST_MODE` | No | `combined` (default, one email with a section per industry) or `per_industry` |
+| `EMAIL_FROM`, `EMAIL_TO` | No | Digest sender/recipient |
+| `SENDGRID_API_KEY` or `SMTP_HOST/PORT/USER/PASSWORD` | No | Email transport |
+| `PIPELINE_SCHEDULE_HOUR` / `_MINUTE` | No | Daily run time (default 07:00) |
+| `PIPELINE_RETRY_DELAY_MINUTES` | No | A failed scheduled run is retried once after this delay (default 30), then an alert email is sent |
+| `DB_PATH` | No | SQLite path (default `medrobo.db`) |
 
-## Dashboard Views
+## Dashboard
 
-- **Event Tracker** — filterable table by sub-segment, event type, date range, company
-- **Notable Events** — high-signal alerts feed with event badges
-- **Briefing** — narrative summary with history of past runs
+The sidebar industry selector filters every tab.
 
-## Data Model
+- **📋 Event Tracker** — filterable table (segment, event type, source, dates, company) with source badges and CSV export
+- **🔔 Notable Events** — high-signal feed from the last 7 days
+- **📰 Briefing** — latest narrative briefing plus history
+- **💬 Ask** — questions answered from the data, with cited sources
+- **🏢 Companies** — 90-day momentum ranking (watchlist starred) and per-company timelines
 
-SQLite database with two tables:
-- `events` — structured event records with deduplication on `source_url`
-- `pipeline_runs` — run metadata and generated briefing text
+## Data model
 
-## Tech Stack
+SQLite:
+- `events` — one row per event per industry (unique on `industry_id, source_url`), with `source_type` and `company_id`
+- `pipeline_runs` — one row per industry per run, with the briefing and per-source counts
+- `companies` — normalized company records shared across industries
 
-| Layer | Tool |
-|---|---|
-| Agents | Anthropic Python SDK (claude-sonnet-4-6) |
-| Web search | Tavily API |
-| Validation | Pydantic v2 |
-| Database | SQLite |
-| Dashboard | Streamlit |
-| Email | SendGrid / SMTP |
-| Scheduling | APScheduler |
+Opening a v1 database migrates it automatically (a backup is written next to it first); existing rows become `healthcare_robotics` events.
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+Source plug-ins are tested against saved sample responses in `tests/fixtures/`; no test makes a live API call.

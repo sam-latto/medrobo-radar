@@ -124,3 +124,20 @@ def send_digests(sections: list[dict], run_date: str) -> None:
         return
     for subject, html_body in build_digests(sections, run_date):
         _send(subject, html_body)
+
+
+def send_failure_alert(failures: list[tuple[str, str]]) -> None:
+    """Email that some industries failed even after a retry. failures: [(industry_id, error)]."""
+    if not EMAIL_FROM or not EMAIL_TO:
+        logger.error(f"Pipeline failures (email not configured, no alert sent): {failures}")
+        return
+    items = "".join(
+        f"<li><strong>{html.escape(industry_id)}</strong>: {html.escape(error or 'unknown error')}</li>"
+        for industry_id, error in failures
+    )
+    body = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;color:#1e293b;">
+<h2>Industry Radar pipeline failed</h2>
+<p>These industries failed on the scheduled run and again on retry:</p><ul>{items}</ul>
+<p>Check the logs, then re-run with <code>python main.py run &lt;industry&gt;</code>.</p>
+</body></html>"""
+    _send(f"Industry Radar — pipeline failed ({len(failures)} industr{'y' if len(failures) == 1 else 'ies'})", body)

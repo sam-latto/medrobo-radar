@@ -279,6 +279,12 @@ with tab1:
             },
         )
         st.caption(f"{len(events)} events shown")
+        st.download_button(
+            "⬇ Download CSV",
+            df.to_csv(index=False).encode("utf-8"),
+            file_name=f"{industry_id or 'all_industries'}_events_{date.today().isoformat()}.csv",
+            mime="text/csv",
+        )
 
 
 # ── Tab 2: Notable Events Feed ────────────────────────────────────────────────

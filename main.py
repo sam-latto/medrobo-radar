@@ -12,9 +12,10 @@ Usage:
 import logging
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from config import PIPELINE_SCHEDULE_HOUR, PIPELINE_SCHEDULE_MINUTE
+from config import PIPELINE_RETRY_DELAY_MINUTES, PIPELINE_SCHEDULE_HOUR, PIPELINE_SCHEDULE_MINUTE
 from database.db import init_db
 
 logging.basicConfig(
@@ -24,21 +25,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _run_pipeline():
+def _retry_failed(profile_ids: list[str]):
+    """Re-run industries whose scheduled run failed; alert by email if they fail again."""
+    from email_digest.sender import send_failure_alert
+    from pipeline.pipeline import run_pipeline
+    still_failing = []
+    for profile_id in profile_ids:
+        result = run_pipeline(profile_id=profile_id, triggered_by="retry")
+        if result["status"] in ("failed", "partial"):
+            still_failing.append((profile_id, result.get("error", "unknown error")))
+    if still_failing:
+        logger.error(f"Pipeline retry failed for: {[p for p, _ in still_failing]}")
+        send_failure_alert(still_failing)
+
+
+def _run_pipeline(scheduler):
     from pipeline.pipeline import run_pipeline
     result = run_pipeline(triggered_by="schedule")
-    logger.info(f"Scheduled pipeline result: {result}")
+    logger.info(f"Scheduled pipeline {result['status']}: {result['events']} events, {result['notable']} notable")
+    failed = [r["industry_id"] for r in result["runs"] if r["status"] == "failed"]
+    if failed:
+        retry_at = datetime.now() + timedelta(minutes=PIPELINE_RETRY_DELAY_MINUTES)
+        logger.warning(f"Pipeline failed for {failed}; retrying at {retry_at:%H:%M}")
+        scheduler.add_job(_retry_failed, "date", run_date=retry_at, args=[failed])
 
 
-def start_background_scheduler() -> BackgroundScheduler:
-    scheduler = BackgroundScheduler()
+def _build_scheduler(scheduler_cls):
+    scheduler = scheduler_cls()
     scheduler.add_job(
         _run_pipeline,
         "cron",
         hour=PIPELINE_SCHEDULE_HOUR,
         minute=PIPELINE_SCHEDULE_MINUTE,
         id="daily_pipeline",
+        args=[scheduler],
     )
+    return scheduler
+
+
+def start_background_scheduler() -> BackgroundScheduler:
+    scheduler = _build_scheduler(BackgroundScheduler)
     scheduler.start()
     logger.info(
         f"Scheduler started — pipeline runs daily at {PIPELINE_SCHEDULE_HOUR:02d}:{PIPELINE_SCHEDULE_MINUTE:02d}"
@@ -95,14 +121,7 @@ def cmd_profiles():
 
 def cmd_scheduler():
     init_db()
-    scheduler = BlockingScheduler()
-    scheduler.add_job(
-        _run_pipeline,
-        "cron",
-        hour=PIPELINE_SCHEDULE_HOUR,
-        minute=PIPELINE_SCHEDULE_MINUTE,
-        id="daily_pipeline",
-    )
+    scheduler = _build_scheduler(BlockingScheduler)
     logger.info(
         f"Scheduler running — pipeline will fire at {PIPELINE_SCHEDULE_HOUR:02d}:{PIPELINE_SCHEDULE_MINUTE:02d} daily"
     )

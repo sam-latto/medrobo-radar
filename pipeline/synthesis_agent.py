@@ -45,8 +45,29 @@ def _describe_rules(profile: IndustryProfile) -> str:
     return "; ".join(parts)
 
 
-def run_synthesis_agent(events: list[ExtractedEvent], profile: IndustryProfile) -> tuple[str, list[int]]:
-    """Returns (briefing_text, list_of_notable_indices)."""
+PREVIOUS_BRIEFING_CHARS = 2500
+
+
+def _previous_briefings_text(previous: list[dict]) -> str:
+    if not previous:
+        return ""
+    parts = [
+        f"--- Briefing of {b['run_date']} ---\n{b['briefing_text'][:PREVIOUS_BRIEFING_CHARS]}"
+        for b in previous
+    ]
+    return (
+        "\n\nFor continuity, here are the most recent previous briefings (newest first). When a story "
+        "develops, say so (e.g. \"following up on…\"); do not repeat old news as if it were new.\n\n"
+        + "\n\n".join(parts)
+    )
+
+
+def run_synthesis_agent(events: list[ExtractedEvent], profile: IndustryProfile,
+                        previous_briefings: list[dict] | None = None) -> tuple[str, list[int]]:
+    """Returns (briefing_text, list_of_notable_indices).
+
+    `previous_briefings`: recent runs' {run_date, briefing_text}, newest first.
+    """
     if not events:
         return "No new events were found in this pipeline run.", []
 
@@ -94,7 +115,7 @@ Source trust: events with source_type openfda or sec_form_d come from official f
 
 Submit both via the submit_briefing tool.
 
-Write for a {profile.briefing_audience} audience. Be specific, cite companies and amounts. Do not pad the briefing."""
+Write for a {profile.briefing_audience} audience. Be specific, cite companies and amounts. Do not pad the briefing.{_previous_briefings_text(previous_briefings or [])}"""
 
     try:
         parsed = call_tool(prompt, BRIEFING_TOOL, max_tokens=4096)

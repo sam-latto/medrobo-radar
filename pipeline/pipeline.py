@@ -52,7 +52,12 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
             return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "complete"}
 
         # Agent 3 — Synthesis
-        briefing_text, notable_indices = run_synthesis_agent(structured_events, profile)
+        previous = [
+            r for r in get_all_runs(profile.id)
+            if r["status"] == "complete" and r.get("briefing_text") and r["id"] != run_id
+            and not r["briefing_text"].startswith("No ")
+        ][:3]
+        briefing_text, notable_indices = run_synthesis_agent(structured_events, profile, previous)
 
         # Link events to company records
         try:
