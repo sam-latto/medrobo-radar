@@ -1,7 +1,6 @@
 import logging
-from datetime import date
 from tavily import TavilyClient
-from config import TAVILY_API_KEY
+from config import TAVILY_API_KEY, SEARCH_TIME_RANGE
 from database.db import url_exists
 from pipeline.models import RawResult
 
@@ -11,11 +10,11 @@ EVENT_TYPES = ["funding", "fda", "launch", "research", "news"]
 SUB_SEGMENTS = ["surgical", "rehabilitation", "diagnostics", "exoskeletons", "AI-assisted"]
 
 QUERY_TEMPLATES = {
-    "funding": "{sub_segment} robotics company funding round investment 2025",
-    "fda": "{sub_segment} medical robot FDA clearance approval De Novo 2025",
-    "launch": "{sub_segment} robotics new product launch announcement 2025",
-    "research": "{sub_segment} robotics clinical trial study results 2025",
-    "news": "{sub_segment} healthcare robotics news development 2025",
+    "funding": "{sub_segment} robotics company funding round investment",
+    "fda": "{sub_segment} medical robot FDA clearance approval De Novo",
+    "launch": "{sub_segment} robotics new product launch announcement",
+    "research": "{sub_segment} robotics clinical trial study results",
+    "news": "{sub_segment} healthcare robotics news development",
 }
 
 
@@ -36,6 +35,7 @@ def run_search_agent() -> list[RawResult]:
                     search_depth="advanced",
                     max_results=5,
                     include_raw_content=False,
+                    time_range=SEARCH_TIME_RANGE,
                 )
                 for item in response.get("results", []):
                     url = item.get("url", "")

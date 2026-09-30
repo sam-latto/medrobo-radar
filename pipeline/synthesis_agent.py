@@ -1,15 +1,31 @@
 import json
 import logging
-import anthropic
 from datetime import date
-from config import ANTHROPIC_API_KEY, MODEL, NOTABLE_FUNDING_THRESHOLD
+from config import NOTABLE_FUNDING_THRESHOLD
+from pipeline.llm import call_tool
 from pipeline.models import ExtractedEvent
 
 logger = logging.getLogger(__name__)
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-HIGH_PRIORITY_TYPES = {"fda", "funding"}
+BRIEFING_TOOL = {
+    "name": "submit_briefing",
+    "description": "Submit the daily briefing and the indices of additional notable events.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "briefing_text": {
+                "type": "string",
+                "description": "Narrative daily briefing in Markdown, 3-5 paragraphs",
+            },
+            "additional_notable_indices": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Indices of notable events beyond the rule-flagged ones",
+            },
+        },
+        "required": ["briefing_text", "additional_notable_indices"],
+    },
+}
 
 
 def _is_rule_notable(event: ExtractedEvent) -> bool:
@@ -63,29 +79,18 @@ Your tasks:
    Flag events that represent significant market signals: M&A, breakthrough products, landmark research, major partnerships.
    Return their index numbers.
 
-Respond in this exact JSON format:
-{{
-  "briefing_text": "...",
-  "additional_notable_indices": [0, 3, 7]
-}}
+Submit both via the submit_briefing tool.
 
 Write for a sophisticated healthcare investor audience. Be specific, cite companies and amounts. Do not pad the briefing."""
 
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        parsed = json.loads(text)
+        parsed = call_tool(prompt, BRIEFING_TOOL, max_tokens=4096)
         briefing_text = parsed["briefing_text"]
-        additional = parsed.get("additional_notable_indices", [])
-        notable_indices = list(set(rule_notable_indices + additional))
+        additional = [
+            i for i in parsed.get("additional_notable_indices", [])
+            if isinstance(i, int) and 0 <= i < len(events)
+        ]
+        notable_indices = sorted(set(rule_notable_indices + additional))
         logger.info(f"Synthesis agent: {len(notable_indices)} notable events flagged")
         return briefing_text, notable_indices
     except Exception as e:

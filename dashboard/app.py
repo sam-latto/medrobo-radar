@@ -1,6 +1,5 @@
 import sys
 import os
-import threading
 import logging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -26,22 +25,7 @@ st.set_page_config(
 
 init_db()
 
-# Start background scheduler once per server process
-if "scheduler_started" not in st.session_state:
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-        from config import PIPELINE_SCHEDULE_HOUR, PIPELINE_SCHEDULE_MINUTE
-
-        def _scheduled_run():
-            from pipeline.pipeline import run_pipeline
-            run_pipeline(triggered_by="schedule")
-
-        _sched = BackgroundScheduler()
-        _sched.add_job(_scheduled_run, "cron", hour=PIPELINE_SCHEDULE_HOUR, minute=PIPELINE_SCHEDULE_MINUTE)
-        _sched.start()
-        st.session_state.scheduler_started = True
-    except Exception:
-        st.session_state.scheduler_started = False
+# The daily scheduler lives only in main.py; the dashboard never starts one.
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
