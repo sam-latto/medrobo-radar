@@ -1,15 +1,16 @@
 """
-CLI entry point for MedRobo Radar.
+CLI entry point for Industry Radar.
 
 Usage:
-  python main.py run           # Run pipeline once manually
-  python main.py scheduler     # Start background scheduler only
-  python main.py               # Start scheduler + Streamlit dashboard
+  python main.py run [profile_id] [--force]   # Run pipeline once (all active profiles by default)
+  python main.py new-profile "battery storage" # Draft a new industry profile (saved inactive)
+  python main.py profiles                      # List industry profiles
+  python main.py scheduler                     # Start background scheduler only
+  python main.py                               # Start scheduler + Streamlit dashboard
 """
 import logging
 import subprocess
 import sys
-import threading
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 from config import PIPELINE_SCHEDULE_HOUR, PIPELINE_SCHEDULE_MINUTE
@@ -44,11 +45,36 @@ def start_background_scheduler() -> BackgroundScheduler:
     return scheduler
 
 
-def cmd_run():
+def cmd_run(args: list[str]):
     from pipeline.pipeline import run_pipeline
     init_db()
-    result = run_pipeline(triggered_by="manual")
-    print(f"\nPipeline complete: {result}")
+    force = "--force" in args
+    positional = [a for a in args if not a.startswith("--")]
+    profile_id = positional[0] if positional else None
+    result = run_pipeline(profile_id=profile_id, triggered_by="manual", force=force)
+    print(f"\nPipeline {result['status']}: {result['events']} events, {result['notable']} notable")
+    for r in result["runs"]:
+        line = f"  - {r['industry_id']}: {r['status']}, {r['events']} events, {r['notable']} notable"
+        if r.get("error"):
+            line += f" (error: {r['error']})"
+        print(line)
+
+
+def cmd_new_profile(args: list[str]):
+    from pipeline.profile_agent import draft_and_save_profile
+    if not args:
+        print('Usage: python main.py new-profile "industry name"')
+        sys.exit(1)
+    profile, path = draft_and_save_profile(" ".join(args))
+    print(f"Drafted profile '{profile.id}' -> {path}")
+    print("It is saved with active: false. Review it, then set active: true (or activate it in the dashboard).")
+
+
+def cmd_profiles():
+    from profiles.loader import load_profiles
+    for p in load_profiles():
+        status = "active" if p.active else "inactive"
+        print(f"{p.id:<28} {status:<9} {p.label} ({len(p.segments)} segments, sources: {', '.join(p.sources)})")
 
 
 def cmd_scheduler():
@@ -83,9 +109,14 @@ def cmd_default():
 
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "default"
+    args = sys.argv[2:]
 
     if command == "run":
-        cmd_run()
+        cmd_run(args)
+    elif command == "new-profile":
+        cmd_new_profile(args)
+    elif command == "profiles":
+        cmd_profiles()
     elif command == "scheduler":
         cmd_scheduler()
     else:

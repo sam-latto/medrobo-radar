@@ -1,0 +1,25 @@
+# Physical AI — general-purpose robots and the models that drive them.
+id: physical_ai
+name: Physical AI
+description: Humanoid robots, warehouse and logistics automation, and robot foundation models that give machines general-purpose physical skills.
+active: true
+segments: [humanoids, warehouse_logistics, robot_foundation_models, mobile_manipulation]
+event_types: [funding, launch, deployment, research, partnership_ma, news]
+search_queries:
+  funding: "{segment} robotics startup funding round raises"
+  launch: "{segment} robot new product unveiled launch"
+  deployment: "{segment} robots commercial deployment customer pilot"
+  research: "{segment} robot learning research paper breakthrough"
+  partnership_ma: "{segment} robotics acquisition partnership deal"
+  news: "{segment} physical AI robotics news"
+notable_rules:
+  funding_threshold_usd: 100000000
+  always_notable_event_types: [partnership_ma]
+sources:
+  tavily: {}
+  sec_form_d:
+    keywords: [humanoid robot, robotics, embodied AI]
+  arxiv:
+    query: 'cat:cs.RO AND (abs:"foundation model" OR abs:humanoid OR abs:"vision-language-action")'
+watchlist: [Figure AI, Agility Robotics, Apptronik, 1X, Boston Dynamics, Tesla, Physical Intelligence, Skild AI, Unitree, Symbotic, Locus Robotics]
+briefing_audience: "deep-tech venture investor"

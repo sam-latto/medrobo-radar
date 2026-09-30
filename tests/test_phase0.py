@@ -1,5 +1,8 @@
 from pipeline import extraction_agent, synthesis_agent
 from pipeline.models import RawResult, ExtractedEvent
+from profiles.loader import load_profile
+
+PROFILE = load_profile("healthcare_robotics")
 
 
 def _raw(i: int) -> RawResult:
@@ -21,7 +24,7 @@ def test_extraction_batches_and_maps_results(monkeypatch):
         calls.append(n)
         return {
             "events": [
-                {"result_id": i, "event_type": "funding", "sub_segment": "surgical", "summary": f"s{i}"}
+                {"result_id": i, "event_type": "funding", "segment": "surgical", "summary": f"s{i}"}
                 for i in range(n)
             ]
         }
@@ -30,7 +33,7 @@ def test_extraction_batches_and_maps_results(monkeypatch):
     monkeypatch.setattr(extraction_agent, "EXTRACTION_BATCH_SIZE", 15)
 
     raw = [_raw(i) for i in range(40)]
-    events = extraction_agent.run_extraction_agent(raw)
+    events = extraction_agent.run_extraction_agent(raw, PROFILE)
 
     assert calls == [15, 15, 10]
     assert [e.source_url for e in events] == [r.url for r in raw]
@@ -43,11 +46,11 @@ def test_extraction_retries_failed_batch_per_item(monkeypatch):
             raise RuntimeError("batch blew up")
         if "Title 2" in prompt:
             raise RuntimeError("bad item")
-        return {"events": [{"result_id": 0, "event_type": "news", "sub_segment": "other", "summary": "ok"}]}
+        return {"events": [{"result_id": 0, "event_type": "news", "segment": "other", "summary": "ok"}]}
 
     monkeypatch.setattr(extraction_agent, "call_tool", fake_call_tool)
     raw = [_raw(i) for i in range(4)]
-    events = extraction_agent.run_extraction_agent(raw)
+    events = extraction_agent.run_extraction_agent(raw, PROFILE)
 
     assert sorted(e.source_url for e in events) == sorted(r.url for i, r in enumerate(raw) if i != 2)
 
@@ -58,27 +61,27 @@ def test_extraction_ignores_bad_result_ids(monkeypatch):
         "call_tool",
         lambda *a, **k: {
             "events": [
-                {"result_id": 0, "event_type": "news", "sub_segment": "other", "summary": "a"},
-                {"result_id": 0, "event_type": "news", "sub_segment": "other", "summary": "dup"},
-                {"result_id": 99, "event_type": "news", "sub_segment": "other", "summary": "out of range"},
+                {"result_id": 0, "event_type": "news", "segment": "other", "summary": "a"},
+                {"result_id": 0, "event_type": "news", "segment": "other", "summary": "dup"},
+                {"result_id": 99, "event_type": "news", "segment": "other", "summary": "out of range"},
             ]
         },
     )
-    events = extraction_agent.run_extraction_agent([_raw(0), _raw(1)])
+    events = extraction_agent.run_extraction_agent([_raw(0), _raw(1)], PROFILE)
     assert [e.summary for e in events] == ["a"]
 
 
 def test_synthesis_uses_tool_output(monkeypatch):
     events = [
-        ExtractedEvent(event_type="fda", sub_segment="surgical", summary="cleared", source_url="u0"),
-        ExtractedEvent(event_type="news", sub_segment="other", summary="n", source_url="u1"),
-        ExtractedEvent(event_type="launch", sub_segment="other", summary="l", source_url="u2"),
+        ExtractedEvent(event_type="regulatory", segment="surgical", summary="cleared", source_url="u0"),
+        ExtractedEvent(event_type="news", segment="other", summary="n", source_url="u1"),
+        ExtractedEvent(event_type="launch", segment="other", summary="l", source_url="u2"),
     ]
     monkeypatch.setattr(
         synthesis_agent,
         "call_tool",
         lambda *a, **k: {"briefing_text": "Hello briefing", "additional_notable_indices": [2, 7]},
     )
-    text, notable = synthesis_agent.run_synthesis_agent(events)
+    text, notable = synthesis_agent.run_synthesis_agent(events, PROFILE)
     assert text == "Hello briefing"
-    assert notable == [0, 2]  # rule-notable FDA + model pick; out-of-range 7 dropped
+    assert notable == [0, 2]  # rule-notable regulatory + model pick; out-of-range 7 dropped

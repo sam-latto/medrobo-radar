@@ -1,9 +1,9 @@
 import json
 import logging
 from datetime import date
-from config import NOTABLE_FUNDING_THRESHOLD
 from pipeline.llm import call_tool
 from pipeline.models import ExtractedEvent
+from profiles.loader import IndustryProfile
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +28,29 @@ BRIEFING_TOOL = {
 }
 
 
-def _is_rule_notable(event: ExtractedEvent) -> bool:
-    if event.event_type == "fda":
+def is_rule_notable(event: ExtractedEvent, profile: IndustryProfile) -> bool:
+    rules = profile.notable_rules
+    if event.event_type in rules.always_notable_event_types:
         return True
-    if event.event_type == "funding" and event.funding_amount and event.funding_amount >= NOTABLE_FUNDING_THRESHOLD:
+    if event.funding_amount and event.funding_amount >= rules.funding_threshold_usd:
         return True
     return False
 
 
-def run_synthesis_agent(events: list[ExtractedEvent]) -> tuple[str, list[int]]:
+def _describe_rules(profile: IndustryProfile) -> str:
+    rules = profile.notable_rules
+    parts = [f"funding of ${rules.funding_threshold_usd:,.0f} or more"]
+    if rules.always_notable_event_types:
+        parts.append("all " + ", ".join(rules.always_notable_event_types) + " events")
+    return "; ".join(parts)
+
+
+def run_synthesis_agent(events: list[ExtractedEvent], profile: IndustryProfile) -> tuple[str, list[int]]:
     """Returns (briefing_text, list_of_notable_indices)."""
     if not events:
         return "No new events were found in this pipeline run.", []
 
-    rule_notable_indices = [i for i, e in enumerate(events) if _is_rule_notable(e)]
+    rule_notable_indices = [i for i, e in enumerate(events) if is_rule_notable(e, profile)]
 
     events_json = json.dumps(
         [
@@ -50,11 +59,12 @@ def run_synthesis_agent(events: list[ExtractedEvent]) -> tuple[str, list[int]]:
                 "company": e.company,
                 "product": e.product,
                 "event_type": e.event_type,
-                "sub_segment": e.sub_segment,
+                "segment": e.segment,
                 "date": e.date,
                 "summary": e.summary,
                 "funding_amount": e.funding_amount,
-                "fda_status": e.fda_status,
+                "regulatory_status": e.regulatory_status,
+                "source_type": e.source_type,
                 "source_url": e.source_url,
             }
             for i, e in enumerate(events)
@@ -62,8 +72,9 @@ def run_synthesis_agent(events: list[ExtractedEvent]) -> tuple[str, list[int]]:
         indent=2,
     )
 
+    watchlist = ", ".join(profile.watchlist) if profile.watchlist else "none specified"
     today = date.today().strftime("%B %d, %Y")
-    prompt = f"""You are the Synthesis Agent for MedRobo Radar, an intelligence platform tracking the healthcare robotics industry.
+    prompt = f"""You are the Synthesis Agent for {profile.label}, an intelligence platform tracking the {profile.name} industry: {profile.description}
 
 Today is {today}. Below are {len(events)} structured events discovered in the latest pipeline run:
 
@@ -72,16 +83,16 @@ Today is {today}. Below are {len(events)} structured events discovered in the la
 Your tasks:
 1. Write a narrative daily briefing (3-5 paragraphs) covering:
    - Top stories from this run
-   - Emerging trends across sub-segments
-   - Companies to watch
+   - Emerging trends across segments ({", ".join(profile.segments)})
+   - Companies to watch (the user's watchlist: {watchlist})
 
-2. Identify additional notable events beyond the rule-flagged ones (large funding, FDA clearances).
+2. Identify additional notable events beyond the rule-flagged ones ({_describe_rules(profile)}).
    Flag events that represent significant market signals: M&A, breakthrough products, landmark research, major partnerships.
    Return their index numbers.
 
 Submit both via the submit_briefing tool.
 
-Write for a sophisticated healthcare investor audience. Be specific, cite companies and amounts. Do not pad the briefing."""
+Write for a {profile.briefing_audience} audience. Be specific, cite companies and amounts. Do not pad the briefing."""
 
     try:
         parsed = call_tool(prompt, BRIEFING_TOOL, max_tokens=4096)
@@ -91,12 +102,12 @@ Write for a sophisticated healthcare investor audience. Be specific, cite compan
             if isinstance(i, int) and 0 <= i < len(events)
         ]
         notable_indices = sorted(set(rule_notable_indices + additional))
-        logger.info(f"Synthesis agent: {len(notable_indices)} notable events flagged")
+        logger.info(f"[{profile.id}] Synthesis agent: {len(notable_indices)} notable events flagged")
         return briefing_text, notable_indices
     except Exception as e:
         logger.error(f"Synthesis agent failed: {e}")
         # Fallback: plain listing
-        lines = [f"**MedRobo Radar — {today}**\n"]
+        lines = [f"**{profile.label} — {today}**\n"]
         for e in events[:10]:
             lines.append(f"- [{e.event_type.upper()}] {e.company or 'Unknown'}: {e.summary}")
         return "\n".join(lines), rule_notable_indices

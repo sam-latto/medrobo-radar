@@ -15,7 +15,8 @@ DB_PATH = os.getenv("DB_PATH", "medrobo.db")
 PIPELINE_SCHEDULE_HOUR = int(os.getenv("PIPELINE_SCHEDULE_HOUR", "7"))
 PIPELINE_SCHEDULE_MINUTE = int(os.getenv("PIPELINE_SCHEDULE_MINUTE", "0"))
 
-NOTABLE_FUNDING_THRESHOLD = int(os.getenv("NOTABLE_FUNDING_THRESHOLD", "50000000"))
+# combined: one email with a section per industry; per_industry: one email each
+DIGEST_MODE = os.getenv("DIGEST_MODE", "combined")
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

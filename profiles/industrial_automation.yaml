@@ -1,0 +1,23 @@
+# Industrial automation — factory robots, controls and machine vision.
+id: industrial_automation
+name: Industrial Automation
+description: Industrial robot arms, collaborative robots, machine vision, motion control and factory software used in manufacturing.
+active: true
+segments: [industrial_robots, cobots, machine_vision, motion_control, factory_software]
+event_types: [funding, launch, deployment, partnership_ma, earnings, news]
+search_queries:
+  funding: "{segment} automation company funding round investment"
+  launch: "{segment} new product launch manufacturing"
+  deployment: "{segment} factory deployment contract order"
+  partnership_ma: "{segment} automation acquisition merger partnership"
+  earnings: "{segment} automation company quarterly results orders revenue"
+  news: "{segment} industrial automation news"
+notable_rules:
+  funding_threshold_usd: 50000000
+  always_notable_event_types: [partnership_ma]
+sources:
+  tavily: {}
+  sec_form_d:
+    keywords: [industrial automation, robotics, machine vision]
+watchlist: [FANUC, ABB, KUKA, Yaskawa, Universal Robots, Cognex, Rockwell Automation, Siemens, Teradyne]
+briefing_audience: "industrial technology investor"

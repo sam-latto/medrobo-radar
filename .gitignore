@@ -13,3 +13,4 @@ env/
 dist/
 build/
 .streamlit/secrets.toml
+*.db.bak-*

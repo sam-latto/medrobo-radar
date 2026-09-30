@@ -1,0 +1,29 @@
+# Healthcare robotics — the original MedRobo Radar industry.
+id: healthcare_robotics
+name: Healthcare Robotics
+display_name: MedRobo Radar
+description: Robotic systems used in surgery, rehab, diagnostics and care delivery.
+active: true
+segments: [surgical, rehabilitation, diagnostics, exoskeletons, ai_assisted]
+event_types: [funding, regulatory, launch, research, partnership_ma, news]
+search_queries:            # {segment} is substituted; no years (recency comes from the source)
+  funding: "{segment} robotics company funding round investment"
+  regulatory: "{segment} medical robot FDA clearance approval De Novo"
+  launch: "{segment} robotics new product launch"
+  research: "{segment} robotics clinical trial study results"
+  partnership_ma: "{segment} robotics acquisition partnership"
+  news: "{segment} healthcare robotics news"
+notable_rules:
+  funding_threshold_usd: 50000000
+  always_notable_event_types: [regulatory, partnership_ma]
+sources:                   # which source plug-ins run for this profile
+  tavily: {}
+  openfda_510k:
+    product_codes: []      # optional FDA product codes to narrow results
+    keywords: [robot, robotic, "robotically-assisted"]
+  sec_form_d:
+    keywords: [robotics, surgical robot]
+  pubmed:
+    query: "(robotic surgery OR surgical robot OR rehabilitation robot)"
+watchlist: [Intuitive Surgical, Medtronic, Stryker, CMR Surgical, Moon Surgical]
+briefing_audience: "sophisticated healthcare investor"
