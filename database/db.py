@@ -152,6 +152,10 @@ def init_db():
             _migrate_v1(conn)
     with get_connection() as conn:
         conn.executescript(SCHEMA)
+        from database.jobs_db import JOBS_SCHEMA  # imported here: jobs_db imports this module
+        conn.executescript(JOBS_SCHEMA)
+        if "industry_match" not in _columns(conn, "job_matches"):
+            conn.execute("ALTER TABLE job_matches ADD COLUMN industry_match INTEGER")
         if "source_counts" not in _columns(conn, "pipeline_runs"):
             conn.execute("ALTER TABLE pipeline_runs ADD COLUMN source_counts TEXT")
         # Placeholder dates like '<UNKNOWN>' break date filters; store them as NULL

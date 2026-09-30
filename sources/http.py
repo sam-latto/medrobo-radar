@@ -15,6 +15,10 @@ _MIN_INTERVAL = {
     "eutils.ncbi.nlm.nih.gov": 0.35,  # NCBI: 3/sec without an API key
     "api.fda.gov": 0.25,         # openFDA: 240/minute
     "clinicaltrials.gov": 0.2,
+    "boards-api.greenhouse.io": 0.2,
+    "api.lever.co": 0.2,
+    "api.ashbyhq.com": 0.2,
+    ".myworkdayjobs.com": 0.5,   # suffix: every company's Workday site
 }
 
 _session = requests.Session()
@@ -23,7 +27,9 @@ _last_request: dict[str, float] = {}
 
 
 def _throttle(host: str) -> None:
-    interval = _MIN_INTERVAL.get(host, 0)
+    interval = _MIN_INTERVAL.get(host)
+    if interval is None:
+        interval = next((v for k, v in _MIN_INTERVAL.items() if k.startswith(".") and host.endswith(k)), 0)
     with _lock:
         wait = _last_request.get(host, 0) + interval - time.monotonic()
         if wait > 0:
@@ -35,5 +41,13 @@ def get(url: str, params: dict | None = None, headers: dict | None = None,
         timeout: float = DEFAULT_TIMEOUT) -> requests.Response:
     _throttle(urlparse(url).netloc)
     response = _session.get(url, params=params, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    return response
+
+
+def post(url: str, json: dict | None = None, headers: dict | None = None,
+         timeout: float = DEFAULT_TIMEOUT) -> requests.Response:
+    _throttle(urlparse(url).netloc)
+    response = _session.post(url, json=json, headers=headers, timeout=timeout)
     response.raise_for_status()
     return response

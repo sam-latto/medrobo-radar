@@ -1,0 +1,140 @@
+{
+ "jobs": [
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/figureai/jobs/4698164006",
+   "data_compliance": [
+    {
+     "type": "gdpr",
+     "requires_consent": false,
+     "requires_processing_consent": false,
+     "requires_retention_consent": false,
+     "retention_period": null,
+     "demographic_data_consent_applies": false
+    }
+   ],
+   "internal_job_id": 4556013006,
+   "location": {
+    "name": "United Arab Emirates"
+   },
+   "metadata": null,
+   "id": 4698164006,
+   "updated_at": "2026-08-02T19:13:18-04:00",
+   "requisition_id": "490",
+   "title": "AI Data Operations Manager",
+   "company_name": "Figure",
+   "first_published": "2026-07-17T21:32:33-04:00",
+   "language": "en",
+   "application_deadline": null,
+   "content": "&lt;p&gt;Figure is an AI robotics company developing autonomous general-purpose humanoid robots. The goal of the company is to ship humanoid robots with human-level intelligence. Our robots are engineered to perform a variety of tasks in the home and commercial markets. Figure is headquartered in San Jose, CA, but we are hiring in the UAE for the first time.&lt;/p&gt;\n&lt;p&gt;We are looking for an AI Data Operations Manager to join Figure&#39;s Operations org and own a meaningful slice of how we produce human data for our humanoid robots. Data is one of the largest and most strategic functions at Figure, and this is a foundational role within it. You will solve zero-to-one problems and coordinate the development of new hardware, software, and operational systems with engineering and product.&lt;/p&gt;\n&lt;p&gt;&lt;strong&gt;Responsibilities:&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;Day one, you will own a meaningful piece of Figure&#39;s data collection operation. You&#39;ll be hitting volume, quality, and velocity targets, building the systems that get us there, and partnering across engineering, product, and ops to make it happen. Specific responsibilities include:&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Owning contributor acquisition, activation, and retention strategy and execution&lt;/li&gt;\n&lt;li&gt;Identifying and launching in new geographies, managing localization, partnerships, and community building to establish presence in target regions&lt;/li&gt;\n&lt;li&gt;Coordinating with engineering, product, and ops to develop the new hardware, software, and operational systems&lt;/li&gt;\n&lt;li&gt;Owning your category\u2019s data dashboard \u2014 tracking volume, quality, and throughput metrics daily, identifying bottlenecks, and shipping operational fixes fast&lt;/li&gt;\n&lt;li&gt;Sourcing, negotiating, and managing relationships with local partners, agencies, and vendors to accelerate growth&lt;/li&gt;\n&lt;li&gt;Serving as the connective tissue between your contributors and internal teams \u2014 surfacing hardware/software friction, translating field feedback into actionable product improvements, and advocating for your workstreams&#39; needs&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&lt;strong&gt;Requirements:&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;4+ years in investment banking, management consulting, corporate development, growth, or startup operations roles, ideally with exposure to a frontier technology business&lt;/li&gt;\n&lt;li&gt;Comfortable rapidly building and deploying apps/agents using AI coding tools (zero technical academic background necessary)&lt;/li&gt;\n&lt;li&gt;Demonstrated ability to own outcomes&lt;/li&gt;\n&lt;li&gt;Exceptional written and verbal communication skills&lt;/li&gt;\n&lt;li&gt;Experience working across cultures or in international markets&lt;/li&gt;\n&lt;li&gt;Highly organized with strong project management instincts \u2014 comfortable managing multiple contributors, sessions, or sites simultaneously and keeping all plates spinning&lt;/li&gt;\n&lt;li&gt;A commitment to 5 days/week in-office collaboration&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&lt;strong&gt;Bonus Qualifications:&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Experience scaling consumer mobile applications or marketplace platforms&lt;/li&gt;\n&lt;li&gt;Background in AI/ML companies or understanding of data collection for machine learning&lt;/li&gt;\n&lt;li&gt;Prior experience in emerging markets or with distributed workforces&lt;/li&gt;\n&lt;li&gt;Fluency in Arabic&lt;/li&gt;\n&lt;li&gt;Experience managing physical-world operations (events, field crews, hardware logistics) in addition to digital platforms&lt;/li&gt;\n&lt;/ul&gt;",
+   "departments": [
+    {
+     "id": 4026621006,
+     "name": "Data Operations",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "offices": [],
+   "ai_disclaimer": null,
+   "include_ai_disclaimer": null,
+   "ai_opt_out_request_url": "http://app6.greenhouse.io/ai_opt_out_request/job_post/4698164006/ai_opt_out"
+  },
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/figureai/jobs/4717486006",
+   "data_compliance": [
+    {
+     "type": "gdpr",
+     "requires_consent": false,
+     "requires_processing_consent": false,
+     "requires_retention_consent": false,
+     "retention_period": null,
+     "demographic_data_consent_applies": false
+    }
+   ],
+   "internal_job_id": 4565984006,
+   "location": {
+    "name": "San Jose, CA"
+   },
+   "metadata": null,
+   "id": 4717486006,
+   "updated_at": "2026-09-29T11:13:33-04:00",
+   "requisition_id": "543",
+   "title": "AV Operations Specialist",
+   "company_name": "Figure",
+   "first_published": "2026-09-29T11:13:33-04:00",
+   "language": "en",
+   "application_deadline": null,
+   "content": "&lt;p&gt;Figure is a robotics and AI company that develops general-purpose autonomous humanoid robots. The company&#39;s goal is to launch humanoid robots with human-level intelligence. Our robots are designed to perform a wide variety of tasks in the residential and commercial markets. Figure is headquartered in San Jose, California, and requires 5 days a week in office collaboration. It&#39;s time to build.&lt;/p&gt;\n&lt;p&gt;As IT/AV Operations Specialist, you will be responsible for the daily operations of all conference rooms, presentation spaces, and ongoing break/fix of audio visual systems. In addition, you will support the IT operations team with ongoing Tier 1 Help Desk tickets, driving issues from report to close-out, assisting with onboarding, offboarding, imaging, inventory and logistics.&amp;nbsp;&lt;/p&gt;\n&lt;p&gt;&lt;strong&gt;Responsibilities&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Managing a fleet of conference rooms in a Zoom environment, supporting ongoing break/fix, user support &amp;amp; training.&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Document, track, and monitor customer problems to ensure resolution in a timely manner through common customer request methods (Ticketing Systems, Chat Software, Email, etc)&lt;/li&gt;\n&lt;li&gt;Assist in building and documenting standards and IT policies across the company.&lt;/li&gt;\n&lt;li&gt;Manage Google Workspace and Okta accounts, groups, and access in coordination with the IT team.&lt;/li&gt;\n&lt;li&gt;Act as backup point of contact for AV support when lead is unavailable.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&lt;strong&gt;Requirements&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;2-3 years in IT or AV support, operations or installation, including experience in:&lt;/li&gt;\n&lt;li&gt;AV/VC systems knowledge in a corporate environment&lt;/li&gt;\n&lt;li&gt;Hands-on experience with device management tools such as Fleet and Google Device Policy MDM systems.&lt;/li&gt;\n&lt;li&gt;Proficiency with Windows, Mac and Linux operating systems.&lt;/li&gt;\n&lt;li&gt;Experience managing Google Workspace and Okta IDP.&lt;/li&gt;\n&lt;li&gt;Solid knowledge of office networks (Wi-Fi, DHCP, VLANs, etc).&lt;/li&gt;\n&lt;li&gt;Excellent customer service, problem solving and teamwork abilities.&lt;/li&gt;\n&lt;li&gt;CA Drivers License&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&lt;strong&gt;Bonus Qualifications:&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Direct experience with enterprise tools such as Google Workspace, Slack, Jira, Zoom, Envoy, FleetDM&lt;/li&gt;\n&lt;li&gt;Experience with enterprise ticketing systems such as Jira, ServiceNow or Zendesk.&lt;/li&gt;\n&lt;li&gt;Direct experience with Logitech &amp;amp; Neat hardware and management tools.&lt;/li&gt;\n&lt;li&gt;Scripts or basic automation for device configuration.&lt;/li&gt;\n&lt;li&gt;Industry certifications ex: AVIXA CTS, Dante, QSC, Extron, Crestron,&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Experience operating within a globally distributed, fast paced enterprise environment.&lt;/li&gt;\n&lt;/ul&gt;",
+   "departments": [
+    {
+     "id": 4020849006,
+     "name": "IT",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "offices": [
+    {
+     "id": 4000271006,
+     "name": "HQ",
+     "location": "San Jose, California, United States",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "ai_disclaimer": null,
+   "include_ai_disclaimer": null,
+   "ai_opt_out_request_url": "http://app6.greenhouse.io/ai_opt_out_request/job_post/4717486006/ai_opt_out"
+  },
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/figureai/jobs/4717759006",
+   "data_compliance": [
+    {
+     "type": "gdpr",
+     "requires_consent": false,
+     "requires_processing_consent": false,
+     "requires_retention_consent": false,
+     "retention_period": null,
+     "demographic_data_consent_applies": false
+    }
+   ],
+   "internal_job_id": 4566096006,
+   "location": {
+    "name": "San Jose, CA"
+   },
+   "metadata": null,
+   "id": 4717759006,
+   "updated_at": "2026-09-29T19:55:31-04:00",
+   "requisition_id": "544",
+   "title": "Data Operations Coordinator (Night Shift)",
+   "company_name": "Figure",
+   "first_published": "2026-09-29T19:55:31-04:00",
+   "language": "en",
+   "application_deadline": null,
+   "content": "&lt;p&gt;Figure is an AI Robotics company developing a general purpose humanoid. Our Humanoid is designed for corporate tasks targeting labor shortages and jobs that are undesirable or unsafe. We are based in San Jose, CA and require 5 days/week in-office collaboration.&amp;nbsp;&lt;/p&gt;\n&lt;p&gt;We are seeking a Data Operations Coordinator for our night shift to lead coordination for offsite robot data collection across an expanding portfolio of residential sites. In this role, you will collaborate closely with cross-functional teams\u2014including facility preparation, prop management, robot operations, and service engineering\u2014to ensure seamless and efficient data collection sessions.&lt;/p&gt;\n&lt;p&gt;&lt;strong&gt;This position is dedicated to the night shift, starting between 3:00 PM and 5:00 PM (subject to minor operational adjustments).&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;Local travel to offsite residential locations throughout the broader Bay Area is required during shift hours; candidates must have access to personal transportation.&lt;/p&gt;\n&lt;p&gt;&lt;strong&gt;Responsibilities:&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;You will manage end-to-end operational coordination for on-site residential robot data collection sessions before, during, and after execution. Key responsibilities include:&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Maintaining real-time communication with field teams to address live operational challenges&lt;/li&gt;\n&lt;li&gt;Troubleshooting non-technical and operational issues promptly to minimize downtime&lt;/li&gt;\n&lt;li&gt;Coordinating with facilities, operators, and staging teams to ensure timely logistics and asset delivery&lt;/li&gt;\n&lt;li&gt;Providing status updates, escalating critical blockers, and reporting progress&lt;/li&gt;\n&lt;li&gt;Driving continuous operational improvements by documenting procedures, flagging recurring issues, and refining standard operating procedures (SOPs) and tracking tools&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&lt;strong&gt;Requirements:&amp;nbsp;&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Ability and willingness to travel to offsite locations across the broader Bay Area using personal transportation&lt;/li&gt;\n&lt;li&gt;2\u20134 years of experience in field operations, site supervision, construction management, event production, or related hands-on coordination roles&lt;/li&gt;\n&lt;li&gt;Proven leadership presence with experience directing multiple cross-functional teams&lt;/li&gt;\n&lt;li&gt;Strong real-time problem-solving and critical decision-making skills&lt;/li&gt;\n&lt;li&gt;Clear, concise, and professional communication skills&lt;/li&gt;\n&lt;li&gt;Ability to thrive under pressure in dynamic, fast-paced operational environments&lt;/li&gt;\n&lt;li&gt;Collaborative mindset with a strong commitment to team success&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;&lt;strong&gt;Bonus Qualifications:&lt;/strong&gt;&lt;/p&gt;\n&lt;ul&gt;\n&lt;li&gt;Experience with robotics, film/TV production, or technical field operations&lt;/li&gt;\n&lt;li&gt;Familiarity with logistics coordination&lt;/li&gt;\n&lt;li&gt;Enthusiasm for scaling cutting-edge humanoid robotics technology&lt;/li&gt;\n&lt;/ul&gt;\n&lt;p&gt;This is a six-month fixed-term agreement, with potential for longer-term opportunities depending on your contributions and interests.&lt;/p&gt;\n&lt;p&gt;The base pay for this role is $30.00/hour.&lt;/p&gt;\n&lt;p&gt;The pay offered for this position may vary based on several individual factors, including job-related knowledge, skills, and experience. The total compensation package may also include additional components/benefits depending on the specific role. This information will be shared if an employment offer is extended.&lt;/p&gt;\n&lt;p&gt;&amp;nbsp;&lt;/p&gt;",
+   "departments": [
+    {
+     "id": 4026621006,
+     "name": "Data Operations",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "offices": [
+    {
+     "id": 4000271006,
+     "name": "HQ",
+     "location": "San Jose, California, United States",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "ai_disclaimer": null,
+   "include_ai_disclaimer": null,
+   "ai_opt_out_request_url": "http://app6.greenhouse.io/ai_opt_out_request/job_post/4717759006/ai_opt_out"
+  }
+ ],
+ "meta": {
+  "total": 99
+ }
+}

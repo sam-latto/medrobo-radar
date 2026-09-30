@@ -75,6 +75,20 @@ The sidebar industry selector filters every tab.
 - **📰 Briefing** — latest narrative briefing plus history
 - **💬 Ask** — questions answered from the data, with cited sources
 - **🏢 Companies** — 90-day momentum ranking (watchlist starred) and per-company timelines
+- **💼 Jobs** — roles in the selected industries that fit your resume (see below)
+
+## Jobs workflow
+
+1. **Add your resume** (PDF, Word, or pasted text). It's stored in the local database and sent to Claude only for scoring and advice.
+2. **Pick target functions** (Product Management, Strategy, … or your own, e.g. "Venture Capital") and locations (comma-separated terms matched against posting locations; blank = anywhere), plus remote options. Preferences are saved.
+3. **Find & score jobs** collects postings from:
+   - the public job-board APIs (Greenhouse, Lever, Ashby) of the industry's watchlist and top-momentum companies, found by trying slugs of each company's name (verified where the board exposes a name; results cached for 30 days);
+   - career-site web search (Tavily, limited to employer career domains — never LinkedIn/Indeed). Only the postings the search finds are stored; boards of unrelated companies aren't imported. Workday postings are read from the career site's own public JSON when available.
+
+   Postings are filtered by job title and location, then Claude scores up to 40 new ones per search against your resume (fit 0–100, strengths, gaps, seniority, and whether the employer is actually in your target industries — off-industry roles are hidden by default).
+4. **Open a job** to see the full posting, the fit analysis, and tailored resume changes: a rewritten summary, bullet rewrites (originals are checked against your resume), keywords to work in, what to emphasize or trim, gaps and how to address them, and a cover-letter angle. **Resume recommendations for these roles** gives overall advice across your targets.
+
+Suggestions never invent experience: Claude may reword and reframe what's on the resume and uses placeholders like `[X%]` where a number would help. All scores and advice are cached per resume; uploading a new resume starts fresh.
 
 ## Data model
 
