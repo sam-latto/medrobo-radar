@@ -25,6 +25,11 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
+# Primary data sources. SEC requires a descriptive User-Agent with a contact email.
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "")
+OPENFDA_API_KEY = os.getenv("OPENFDA_API_KEY", "")
+NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
+
 # Tavily recency filter: day | week | month | year
 SEARCH_TIME_RANGE = os.getenv("SEARCH_TIME_RANGE", "week")
 EXTRACTION_BATCH_SIZE = int(os.getenv("EXTRACTION_BATCH_SIZE", "15"))

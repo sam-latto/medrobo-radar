@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<!-- Synthetic Form D (schema X0708) for tests; the issuer and all values are fictional. -->
+<edgarSubmission>
+    <schemaVersion>X0708</schemaVersion>
+    <submissionType>D</submissionType>
+    <testOrLive>LIVE</testOrLive>
+    <primaryIssuer>
+        <cik>0009999999</cik>
+        <entityName>Example Surgical Robotics, Inc.</entityName>
+        <issuerAddress>
+            <city>BOSTON</city>
+            <stateOrCountry>MA</stateOrCountry>
+            <stateOrCountryDescription>MASSACHUSETTS</stateOrCountryDescription>
+        </issuerAddress>
+        <jurisdictionOfInc>DELAWARE</jurisdictionOfInc>
+        <entityType>Corporation</entityType>
+        <yearOfInc>
+            <withinFiveYears>true</withinFiveYears>
+            <value>2023</value>
+        </yearOfInc>
+    </primaryIssuer>
+    <offeringData>
+        <industryGroup>
+            <industryGroupType>Other Health Care</industryGroupType>
+        </industryGroup>
+        <typeOfFiling>
+            <newOrAmendment>
+                <isAmendment>false</isAmendment>
+            </newOrAmendment>
+            <dateOfFirstSale>
+                <value>2026-08-20</value>
+            </dateOfFirstSale>
+        </typeOfFiling>
+        <typesOfSecuritiesOffered>
+            <isEquityType>true</isEquityType>
+        </typesOfSecuritiesOffered>
+        <offeringSalesAmounts>
+            <totalOfferingAmount>40000000</totalOfferingAmount>
+            <totalAmountSold>32500000</totalAmountSold>
+            <totalRemaining>7500000</totalRemaining>
+        </offeringSalesAmounts>
+        <investors>
+            <hasNonAccreditedInvestors>false</hasNonAccreditedInvestors>
+            <totalNumberAlreadyInvested>12</totalNumberAlreadyInvested>
+        </investors>
+    </offeringData>
+</edgarSubmission>

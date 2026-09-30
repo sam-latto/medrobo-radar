@@ -1,63 +1,50 @@
+"""Collection stage: run every source plug-in listed in the profile."""
 import logging
-from tavily import TavilyClient
-from config import TAVILY_API_KEY, SEARCH_TIME_RANGE
+from datetime import date, timedelta
+
 from database.db import url_exists
 from pipeline.models import RawResult
 from profiles.loader import IndustryProfile
+from sources.registry import get_source
+from sources.tavily_source import build_queries  # noqa: F401  (re-exported for callers/tests)
 
 logger = logging.getLogger(__name__)
 
 
-def build_queries(profile: IndustryProfile) -> list[tuple[str, str]]:
-    """Return (query, query_tag) pairs: profile.search_queries x profile.segments.
+def run_search_agent(profile: IndustryProfile) -> tuple[list[RawResult], dict[str, dict]]:
+    """Returns (new results across all sources, per-source counts).
 
-    A template without a {segment} placeholder runs once, tagged with segment 'other'.
+    Results already stored for this industry, or seen from an earlier source in
+    this run, are dropped. Sources run in profile order; a failing source is
+    logged and skipped.
     """
-    queries: list[tuple[str, str]] = []
-    for event_type, template in profile.search_queries.items():
-        if "{segment}" not in template:
-            queries.append((template, f"{event_type}:other"))
-            continue
-        for segment in profile.segments:
-            query = template.format(segment=segment.replace("_", " "))
-            queries.append((query, f"{event_type}:{segment}"))
-    return queries
-
-
-def run_search_agent(profile: IndustryProfile) -> list[RawResult]:
-    settings = profile.sources.get("tavily", {})
-    client = TavilyClient(api_key=TAVILY_API_KEY)
     results: list[RawResult] = []
     seen_urls: set[str] = set()
+    counts: dict[str, dict] = {}
 
-    for query, query_tag in build_queries(profile):
-        logger.info(f"Searching: {query}")
+    for name, cfg in profile.sources.items():
+        source = get_source(name)
+        if source is None:
+            logger.warning(f"[{profile.id}] Unknown source '{name}' in profile; skipping")
+            counts[name] = {"fetched": 0, "new": 0, "error": "unknown source"}
+            continue
+        since = date.today() - timedelta(days=int(cfg.get("lookback_days", source.default_lookback_days)))
         try:
-            response = client.search(
-                query=query,
-                search_depth=settings.get("search_depth", "advanced"),
-                max_results=settings.get("max_results", 5),
-                include_raw_content=False,
-                time_range=settings.get("time_range", SEARCH_TIME_RANGE),
-            )
-            for item in response.get("results", []):
-                url = item.get("url", "")
-                if not url or url in seen_urls or url_exists(url, profile.id):
-                    continue
-                seen_urls.add(url)
-                results.append(
-                    RawResult(
-                        title=item.get("title", ""),
-                        url=url,
-                        snippet=item.get("content", ""),
-                        source=url.split("/")[2] if url.count("/") >= 2 else url,
-                        date=item.get("published_date"),
-                        query_tag=query_tag,
-                        source_type="tavily",
-                    )
-                )
+            fetched = source.fetch(profile, since)
         except Exception as e:
-            logger.error(f"Search failed for query '{query}': {e}")
+            logger.error(f"[{profile.id}] Source {name} failed: {e}")
+            counts[name] = {"fetched": 0, "new": 0, "error": str(e)}
+            continue
+
+        new = []
+        for r in fetched:
+            if r.url in seen_urls or url_exists(r.url, profile.id):
+                continue
+            seen_urls.add(r.url)
+            new.append(r)
+        results.extend(new)
+        counts[name] = {"fetched": len(fetched), "new": len(new)}
+        logger.info(f"[{profile.id}] Source {name}: {len(fetched)} fetched, {len(new)} new")
 
     logger.info(f"[{profile.id}] Search agent found {len(results)} new results")
-    return results
+    return results, counts

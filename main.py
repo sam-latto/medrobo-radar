@@ -58,6 +58,9 @@ def cmd_run(args: list[str]):
         if r.get("error"):
             line += f" (error: {r['error']})"
         print(line)
+        for name, c in (r.get("source_counts") or {}).items():
+            print(f"      {name}: {c.get('fetched', 0)} fetched, {c.get('new', 0)} new"
+                  + (f" (error: {c['error']})" if c.get("error") else ""))
 
 
 def cmd_new_profile(args: list[str]):

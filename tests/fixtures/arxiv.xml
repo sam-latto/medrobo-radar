@@ -1,0 +1,81 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/qNbVEPr6dyoNDPdMzH9SEaP1qyY</id>
+  <title>arXiv Query: search_query=cat:cs.RO AND (abs:"foundation model" OR abs:humanoid)&amp;id_list=&amp;start=0&amp;max_results=2</title>
+  <updated>2026-09-30T00:17:54Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:cs.RO+AND+(abs:%22foundation+model%22+OR+abs:humanoid)&amp;start=0&amp;max_results=2&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>2</opensearch:itemsPerPage>
+  <opensearch:totalResults>3120</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2609.35709v1</id>
+    <title>Humanoid Loco-Manipulation With Discrete VLA Model</title>
+    <updated>2026-09-28T17:44:15Z</updated>
+    <link href="https://arxiv.org/abs/2609.35709v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.35709v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Vision-language-action (VLA) models using discrete action tokens have proven effective for controling robotic arms on manipulation tasks. For a humanoid, however, the whole-body action space -- legs, torso, arms, and hands -- is far higher-dimensional and heterogeneous, raising tokenization, training, and real-time inference challenges that the previous VLA models do not address. We present Holo-M, to our knowledge the first discrete VLA model for humanoid loco-manipulation that intrinsically exploits the language model by extending its vocabulary with action tokens. In this model, we devise a unified action tokenizer that decomposes the humanoid action space into four body-part-specific tokenizers -- end-effector, body, hand, and kinematics -- enabling training across drastically different embodiments and data sources, including humanoid teleoperation, ego-centric human video, and simulation. By extending the language model's vocabulary with these action tokens, we avoid the knowledge-insulation problem inherent to the models that use separate continuous action experts. To meet real-time control requirements, we decode each body part's action tokens through grouped discrete diffusion decoding, rather than using autoregression on the action tokens. We have conducted extensive experiments on the SIMPLE humanoid loco-manipulation benchmark, in which Holo-M achieves the highest success rates in both the generalist and specialist evaluations, leading the second best by significant margins. We will release all the code and model weights.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-28T17:44:15Z</published>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>Wenxin Shao</name>
+    </author>
+    <author>
+      <name>Siqi Chai</name>
+    </author>
+    <author>
+      <name>Kun Li</name>
+    </author>
+    <author>
+      <name>Kerou Zhang</name>
+    </author>
+    <author>
+      <name>Xinzhou Jiang</name>
+    </author>
+    <author>
+      <name>Wei Xu</name>
+    </author>
+    <author>
+      <name>Qiang Liu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.35652v1</id>
+    <title>MM-ABC: Towards Generalist Mobile Manipulation via Seeing, Coordinating and Imagining</title>
+    <updated>2026-09-28T17:19:51Z</updated>
+    <link href="https://arxiv.org/abs/2609.35652v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.35652v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Mobile manipulation extends robot interaction beyond a fixed kinematic workspace by making the reachable region itself controllable. This flexibility introduces two central challenges: spatially grounded perception under continuous ego-motion and coordinated control of heterogeneous arm and base actions. Existing approaches strengthen geometry through explicit 3D representations or predictive world models, and often decouple mobility and manipulation into separate action streams. We argue that effective mobile manipulation requires not only decoupling, but also representations that support efficient cross-stream collaboration. We present MM-ABC, a foundation model built around Seeing, Coordinating, and Imagining Arm-Base Collaboration. MM-ABC combines sparse multi-level VLM features for spatial perception; a training-only future branch that uses world imagination and geometric intent as extra supervision, strengthening perception and manipulation-intent prediction and improving the overall learning signal; and MM-APT, which coordinates separate manipulation and mobility streams through masked joint attention and clean-action x-prediction. In controlled ablations, replacing clean-action prediction with velocity prediction lowers success on RoboCasa365 composite-seen tasks from 32.8% to 29.2%, and removing future supervision or multilevel conditioning causes larger drops. We pretrain MM-ABC on 5,000+ hours of heterogeneous robot data spanning 400K+ episodes, 12 datasets, and 17 embodiments. Experiments cover EBench, RoboCasa365, ManiSkill-HAB, LIBERO, LIBERO-Plus, and real-world mobile manipulation. MM-ABC achieves 44.71% success on EBench, 61.2% on RoboCasa365, 99.1% on LIBERO, 82.8% on LIBERO-Plus without perturbation training, and 83% mean success on five real-world tasks.</summary>
+    <category term="cs.RO" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-28T17:19:51Z</published>
+    <arxiv:comment>Webpage: https://mm-abc.github.io/</arxiv:comment>
+    <arxiv:primary_category term="cs.RO"/>
+    <author>
+      <name>Qiwei Liang</name>
+    </author>
+    <author>
+      <name>Guangyu Chen</name>
+    </author>
+    <author>
+      <name>Shaolong Zhu</name>
+    </author>
+    <author>
+      <name>Zikuan Xiao</name>
+    </author>
+    <author>
+      <name>Jinxuan Lu</name>
+    </author>
+    <author>
+      <name>Yifan Xie</name>
+    </author>
+    <author>
+      <name>Renjing Xu</name>
+    </author>
+    <author>
+      <name>Wenbo Ding</name>
+    </author>
+    <author>
+      <name>Tianxing Chen</name>
+    </author>
+  </entry>
+</feed>

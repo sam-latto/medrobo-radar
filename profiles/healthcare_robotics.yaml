@@ -22,8 +22,12 @@ sources:                   # which source plug-ins run for this profile
     product_codes: []      # optional FDA product codes to narrow results
     keywords: [robot, robotic, "robotically-assisted"]
   sec_form_d:
-    keywords: [robotics, surgical robot]
+    keywords: [robotics, robotic, surgical robot, exoskeleton]
+    # Form D has no business description; keep only health-care issuers
+    industry_groups: [Other Health Care, Biotechnology, Hospitals and Physicians, Pharmaceuticals]
   pubmed:
     query: "(robotic surgery OR surgical robot OR rehabilitation robot)"
+  clinicaltrials:
+    query: "robotic surgery OR surgical robot OR exoskeleton OR rehabilitation robot"
 watchlist: [Intuitive Surgical, Medtronic, Stryker, CMR Surgical, Moon Surgical]
 briefing_audience: "sophisticated healthcare investor"

@@ -1,9 +1,11 @@
 anthropic>=0.40.0
 tavily-python>=0.3.0
 pydantic>=2.0.0
-streamlit>=1.35.0
+streamlit>=1.50.0
 apscheduler>=3.10.0
 sendgrid>=6.11.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
 pytest>=8.0.0
+requests>=2.31.0
+pyyaml>=6.0

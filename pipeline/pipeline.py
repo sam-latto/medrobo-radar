@@ -32,18 +32,19 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
 
     try:
         # Agent 1 — Search
-        raw_results = run_search_agent(profile)
+        raw_results, source_counts = run_search_agent(profile)
+        base["source_counts"] = source_counts
 
         if not raw_results:
             logger.warning(f"[{profile.id}] No new results found; completing run with empty briefing.")
-            update_run(run_id, "complete", "No new events found in this run.")
+            update_run(run_id, "complete", "No new events found in this run.", source_counts)
             return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "complete"}
 
         # Agent 2 — Extraction
         structured_events = run_extraction_agent(raw_results, profile)
 
         if not structured_events:
-            update_run(run_id, "complete", "No events could be extracted from search results.")
+            update_run(run_id, "complete", "No events could be extracted from search results.", source_counts)
             return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "complete"}
 
         # Agent 3 — Synthesis
@@ -54,7 +55,7 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
             event.is_notable = i in notable_indices
             insert_event(run_id, event.model_dump())
 
-        update_run(run_id, "complete", briefing_text)
+        update_run(run_id, "complete", briefing_text, source_counts)
 
         logger.info(
             f"[{profile.id}] Pipeline run {run_id} complete: "
@@ -72,7 +73,7 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
 
     except Exception as e:
         logger.error(f"[{profile.id}] Pipeline run {run_id} failed: {e}", exc_info=True)
-        update_run(run_id, "failed")
+        update_run(run_id, "failed", source_counts=base.get("source_counts"))
         return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "failed", "error": str(e)}
 
 

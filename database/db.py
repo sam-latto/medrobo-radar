@@ -1,3 +1,4 @@
+import json
 import logging
 import shutil
 import sqlite3
@@ -18,6 +19,7 @@ SCHEMA = """
         triggered_by TEXT NOT NULL,
         status TEXT NOT NULL,
         briefing_text TEXT,
+        source_counts TEXT,
         completed_at TIMESTAMP
     );
 
@@ -139,6 +141,8 @@ def init_db():
             _migrate_v1(conn)
     with get_connection() as conn:
         conn.executescript(SCHEMA)
+        if "source_counts" not in _columns(conn, "pipeline_runs"):
+            conn.execute("ALTER TABLE pipeline_runs ADD COLUMN source_counts TEXT")
         # Placeholder dates like '<UNKNOWN>' break date filters; store them as NULL
         conn.execute("UPDATE events SET date = NULL WHERE date NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'")
 
@@ -179,11 +183,14 @@ def insert_run(run_id: str, run_date: str, triggered_by: str, industry_id: str) 
         )
 
 
-def update_run(run_id: str, status: str, briefing_text: str = None) -> None:
+def update_run(run_id: str, status: str, briefing_text: str = None, source_counts: dict = None) -> None:
     with get_connection() as conn:
         conn.execute(
-            "UPDATE pipeline_runs SET status = ?, briefing_text = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (status, briefing_text, run_id),
+            """UPDATE pipeline_runs
+               SET status = ?, briefing_text = ?, source_counts = COALESCE(?, source_counts),
+                   completed_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (status, briefing_text, json.dumps(source_counts) if source_counts is not None else None, run_id),
         )
 
 

@@ -4,20 +4,22 @@ import re
 
 from pipeline.llm import call_tool
 from profiles.loader import IndustryProfile, normalize_key, profile_exists, save_profile
+from sources.registry import SOURCES
 
 logger = logging.getLogger(__name__)
 
-# Source plug-ins a drafted profile may enable, with the config each one takes.
-SOURCE_SCHEMAS = {
-    "tavily": {"type": "object", "description": "Web/news search. Always include, with an empty config."},
-}
-
-
 def _sources_schema() -> dict:
+    """Every registered source plug-in, with the config block it takes."""
     return {
         "type": "object",
-        "description": "Data sources to run for this industry, keyed by source name.",
-        "properties": SOURCE_SCHEMAS,
+        "description": (
+            "Data sources to run for this industry, keyed by source name. Always include tavily "
+            "(empty config is fine); add primary sources only where they fit the industry."
+        ),
+        "properties": {
+            name: {**source.config_schema, "description": source.description}
+            for name, source in SOURCES.items()
+        },
         "required": ["tavily"],
     }
 

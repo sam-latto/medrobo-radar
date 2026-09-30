@@ -13,6 +13,13 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
             "type": "integer",
             "description": "The [id] of the search result this event was extracted from",
         },
+        "relevant": {
+            "type": "boolean",
+            "description": (
+                f"false if the result is not really about the {profile.name} industry "
+                "(off-topic article, unrelated company, generic listicle); such results are discarded"
+            ),
+        },
         "company": {
             "type": "string",
             "description": "Name of the primary company involved",
@@ -59,7 +66,7 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
                     "items": {
                         "type": "object",
                         "properties": event_properties,
-                        "required": ["result_id", "event_type", "segment", "summary"],
+                        "required": ["result_id", "relevant", "event_type", "segment", "summary"],
                     },
                 }
             },
@@ -68,16 +75,35 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
     }
 
 
+PREFILL_FIELDS = ("company", "product", "event_type", "date", "funding_amount", "regulatory_status")
+
+
 def _format_result(result_id: int, result: RawResult) -> str:
     hint_event, hint_segment = result.query_tag.split(":", 1)
-    return (
-        f"[id={result_id}]\n"
-        f"Title: {result.title}\n"
-        f"Source: {result.source} ({result.source_type})\n"
-        f"Published: {result.date or 'Unknown'}\n"
-        f"Search context: found while searching for '{hint_event}' events in the '{hint_segment}' segment\n"
-        f"Content: {result.snippet}"
-    )
+    lines = [
+        f"[id={result_id}]",
+        f"Title: {result.title}",
+        f"Source: {result.source} ({result.source_type})",
+        f"Published: {result.date or 'Unknown'}",
+        f"Search context: found while searching for '{hint_event}' events in the '{hint_segment}' segment",
+    ]
+    facts = {k: v for k, v in result.prefilled.items() if v is not None}
+    if facts:
+        lines.append(f"Authoritative facts from the primary source (use as-is): {facts}")
+    lines.append(f"Content: {result.snippet}")
+    return "\n".join(lines)
+
+
+def _merge_prefilled(item: dict, result: RawResult) -> dict:
+    for key in PREFILL_FIELDS:
+        if result.prefilled.get(key) is not None:
+            item[key] = result.prefilled[key]
+    return item
+
+
+def _event_from_prefilled(result: RawResult) -> dict:
+    """Fallback when the model skipped a primary-source result it did not reject."""
+    return _merge_prefilled({"summary": result.title, "segment": "other", "event_type": "news"}, result)
 
 
 def _extract_batch(batch: list[RawResult], profile: IndustryProfile) -> list[ExtractedEvent]:
@@ -85,7 +111,7 @@ def _extract_batch(batch: list[RawResult], profile: IndustryProfile) -> list[Ext
     results_text = "\n\n---\n\n".join(_format_result(i, r) for i, r in enumerate(batch))
     prompt = f"""You are analyzing {len(batch)} search results for an intelligence platform tracking the {profile.name} industry ({profile.description}).
 
-Extract one structured event per result.
+Extract one structured event per result. Where a result lists authoritative facts from a primary source (FDA, SEC, research databases), keep those facts exactly; classify its segment and write the summary from them. Mark results that are not really about this industry as relevant=false.
 
 {results_text}
 
@@ -93,15 +119,28 @@ Call the record_events tool with one entry per result, using its [id] as result_
 
     data = call_tool(prompt, build_extract_tool(profile), max_tokens=8192)
 
-    events: list[ExtractedEvent] = []
+    items: list[tuple[RawResult, dict]] = []
     seen_ids: set[int] = set()
+    dropped = 0
     for item in data.get("events", []):
         result_id = item.pop("result_id", None)
         if not isinstance(result_id, int) or not 0 <= result_id < len(batch) or result_id in seen_ids:
             logger.warning(f"Extraction returned invalid or duplicate result_id: {result_id}")
             continue
         seen_ids.add(result_id)
-        result = batch[result_id]
+        if item.pop("relevant", True) is False:
+            dropped += 1
+            continue
+        items.append((batch[result_id], _merge_prefilled(item, batch[result_id])))
+
+    for result_id, result in enumerate(batch):
+        if result_id not in seen_ids and result.prefilled:
+            items.append((result, _event_from_prefilled(result)))
+    if dropped:
+        logger.info(f"Extraction discarded {dropped} off-topic result(s)")
+
+    events: list[ExtractedEvent] = []
+    for result, item in items:
         item["source_url"] = result.url
         item["source_type"] = result.source_type
         item["industry_id"] = profile.id

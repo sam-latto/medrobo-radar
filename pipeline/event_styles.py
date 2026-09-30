@@ -41,3 +41,28 @@ def event_icon(event_type: str) -> str:
 
 def event_label(event_type: str) -> str:
     return "PARTNERSHIP / M&A" if event_type == "partnership_ma" else event_type.replace("_", " ").upper()
+
+
+SOURCE_LABELS = {
+    "tavily": "Web",
+    "openfda": "FDA",
+    "sec_form_d": "SEC Form D",
+    "pubmed": "PubMed",
+    "arxiv": "arXiv",
+    "clinicaltrials": "ClinicalTrials.gov",
+}
+PRIMARY_SOURCE_TYPES = {"openfda", "sec_form_d", "pubmed", "arxiv", "clinicaltrials"}
+
+
+def source_label(source_type: str | None) -> str:
+    return SOURCE_LABELS.get(source_type or "tavily", source_type or "Web")
+
+
+def source_badge_html(source_type: str | None) -> str:
+    primary = (source_type or "tavily") in PRIMARY_SOURCE_TYPES
+    bg, fg = ("#0f172a", "#ffffff") if primary else ("#e2e8f0", "#334155")
+    title = "Primary source" if primary else "Secondary source (web/news)"
+    return (
+        f'<span title="{title}" style="background:{bg};color:{fg};padding:2px 8px;border-radius:4px;'
+        f'font-size:11px;font-weight:600;margin-left:8px;">{source_label(source_type)}</span>'
+    )

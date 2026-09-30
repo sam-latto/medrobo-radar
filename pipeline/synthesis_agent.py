@@ -87,8 +87,10 @@ Your tasks:
    - Companies to watch (the user's watchlist: {watchlist})
 
 2. Identify additional notable events beyond the rule-flagged ones ({_describe_rules(profile)}).
-   Flag events that represent significant market signals: M&A, breakthrough products, landmark research, major partnerships.
+   Be selective: flag only the handful of events (typically under 10) that represent significant market signals such as M&A, breakthrough products, landmark research or major partnerships.
    Return their index numbers.
+
+Source trust: events with source_type openfda or sec_form_d come from official filings and are authoritative; pubmed, arxiv and clinicaltrials are primary research records; tavily results are secondary (web/news). When a news report conflicts with a primary source (e.g. a different funding amount or clearance date), use the primary source's figure and say so briefly.
 
 Submit both via the submit_briefing tool.
 

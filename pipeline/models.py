@@ -33,6 +33,9 @@ class RawResult(BaseModel):
     date: Optional[str] = None
     query_tag: str
     source_type: str = "tavily"
+    # Authoritative fields from a structured source (e.g. FDA decision, Form D amount);
+    # these override whatever extraction infers
+    prefilled: dict = {}
 
 
 class ExtractedEvent(BaseModel):

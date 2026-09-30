@@ -15,8 +15,10 @@ from database.db import (
     get_latest_run,
     get_all_runs,
 )
-from pipeline.event_styles import event_color, event_icon, event_label
+import json
+from pipeline.event_styles import SOURCE_LABELS, event_color, event_icon, event_label, source_badge_html, source_label
 from profiles.loader import load_profiles, parse_profile, save_profile
+from sources.registry import SOURCES
 
 logging.basicConfig(level=logging.INFO)
 
@@ -207,12 +209,14 @@ tab1, tab2, tab3 = st.tabs(["📋 Event Tracker", "🔔 Notable Events", "📰 B
 with tab1:
     st.header("Company & Product Tracker")
 
-    col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
+    col1, col2, col6, col3, col4, col5 = st.columns([2, 2, 2, 2, 2, 2])
 
     with col1:
         segment_filter = st.selectbox("Segment", ["All"] + segment_options)
     with col2:
         event_type_filter = st.selectbox("Event type", ["All"] + event_type_options)
+    with col6:
+        source_filter = st.selectbox("Source", ["All"] + list(SOURCE_LABELS), format_func=lambda s: s if s == "All" else source_label(s))
     with col3:
         date_from = st.date_input("From", value=date.today() - timedelta(days=90))
     with col4:
@@ -227,6 +231,7 @@ with tab1:
         date_from=date_from.isoformat() if date_from else None,
         date_to=date_to.isoformat() if date_to else None,
         company=company_filter or None,
+        source_type=None if source_filter == "All" else source_filter,
     )
 
     if not events:
@@ -234,6 +239,7 @@ with tab1:
     else:
         df = pd.DataFrame(events)
         df["industry_id"] = df["industry_id"].map(_industry_name)
+        df["source_type"] = df["source_type"].map(source_label)
         display_cols = ["company", "product", "event_type", "segment", "date", "summary", "source_url",
                         "source_type", "funding_amount", "regulatory_status", "is_notable"]
         if not industry_id:
@@ -302,6 +308,7 @@ with tab2:
                 card = (
                     f'<div style="border-left:4px solid {color};padding:12px 20px;margin:8px 0;background:#f8fafc;border-radius:0 8px 8px 0;color:#0f172a;">'
                     f'<span style="background:{color};color:white;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:bold;">{icon} {html.escape(event_label(event_type))}</span>'
+                    f'{source_badge_html(e.get("source_type"))}'
                     f'<span style="color:#64748b;font-size:13px;margin-left:12px;">{ev_date}{industry_tag}</span>'
                     f'<p style="margin:8px 0;font-size:16px;font-weight:600;">{company} {product_str}</p>'
                     f'<p style="margin:4px 0;color:#334155;">{summary}{funding_str}{regulatory_str}</p>'
@@ -331,6 +338,13 @@ with tab3:
         current = completed_runs[0]
         st.subheader(f"Latest Briefing — {current['run_date']}")
         st.caption(f"Completed: {current.get('completed_at', '—')} · Triggered by: {current.get('triggered_by', '—')}")
+        if current.get("source_counts"):
+            counts = json.loads(current["source_counts"])
+            st.caption("New results by source: " + " · ".join(
+                f"{source_label(SOURCES[name].source_type if name in SOURCES else name)} {c.get('new', 0)}"
+                + (" (error)" if c.get("error") else "")
+                for name, c in counts.items()
+            ))
         st.divider()
         st.markdown(current["briefing_text"])
 
