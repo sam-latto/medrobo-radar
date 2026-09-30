@@ -19,6 +19,7 @@ import json
 from pipeline.event_styles import SOURCE_LABELS, event_color, event_icon, event_label, source_badge_html, source_label
 from profiles.loader import load_profiles, parse_profile, save_profile
 from sources.registry import SOURCES
+from pipeline.text_utils import html_safe_dollars, md_safe, strip_index_refs
 
 logging.basicConfig(level=logging.INFO)
 
@@ -322,7 +323,7 @@ with tab2:
                     f'<p style="margin:4px 0;color:#334155;">{summary}{funding_str}{regulatory_str}</p>'
                     f'</div>'
                 )
-                st.markdown(card, unsafe_allow_html=True)
+                st.markdown(html_safe_dollars(card), unsafe_allow_html=True)
                 if url:
                     st.markdown(f"[Read source →]({url})")
                 st.write("")
@@ -354,7 +355,7 @@ with tab3:
                 for name, c in counts.items()
             ))
         st.divider()
-        st.markdown(current["briefing_text"])
+        st.markdown(md_safe(strip_index_refs(current["briefing_text"])))
 
         # Previous briefings
         past_runs = completed_runs[1:]
@@ -363,7 +364,7 @@ with tab3:
             st.subheader("Previous Briefings")
             for run in past_runs:
                 with st.expander(f"{run['run_date']} · {run.get('completed_at') or ''}"):
-                    st.markdown(run["briefing_text"])
+                    st.markdown(md_safe(strip_index_refs(run["briefing_text"])))
 
 
 # ── Tab 4: Ask ────────────────────────────────────────────────────────────────

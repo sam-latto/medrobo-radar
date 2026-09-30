@@ -3,6 +3,7 @@ import logging
 from datetime import date
 from pipeline.llm import call_tool
 from pipeline.models import ExtractedEvent
+from pipeline.text_utils import strip_index_refs
 from profiles.loader import IndustryProfile
 
 logger = logging.getLogger(__name__)
@@ -115,11 +116,11 @@ Source trust: events with source_type openfda or sec_form_d come from official f
 
 Submit both via the submit_briefing tool.
 
-Write for a {profile.briefing_audience} audience. Be specific, cite companies and amounts. Do not pad the briefing.{_previous_briefings_text(previous_briefings or [])}"""
+Write for a {profile.briefing_audience} audience. Be specific, cite companies and amounts. Do not pad the briefing. The index numbers are only for additional_notable_indices: never mention them in briefing_text.{_previous_briefings_text(previous_briefings or [])}"""
 
     try:
         parsed = call_tool(prompt, BRIEFING_TOOL, max_tokens=4096)
-        briefing_text = parsed["briefing_text"]
+        briefing_text = strip_index_refs(parsed["briefing_text"])
         additional = [
             i for i in parsed.get("additional_notable_indices", [])
             if isinstance(i, int) and 0 <= i < len(events)

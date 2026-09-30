@@ -6,6 +6,7 @@ from database import companies as company_db
 from pipeline.companies import ensure_companies
 from pipeline.event_styles import event_icon, event_label, source_label
 from pipeline.momentum import WINDOW_DAYS, rank_companies
+from pipeline.text_utils import md_safe
 
 
 def _money(x) -> str:
@@ -54,8 +55,8 @@ def _render_company(company: dict, industry_id: str) -> None:
     for e in events:
         amount = f" · **{_money(e.get('funding_amount'))}**" if e.get("funding_amount") else ""
         st.markdown(
-            f"{event_icon(e['event_type'])} **{e.get('date') or 'undated'}** · {event_label(e['event_type'])}"
-            f"{amount} — {e['summary']}  \n"
+            md_safe(f"{event_icon(e['event_type'])} **{e.get('date') or 'undated'}** · "
+                    f"{event_label(e['event_type'])}{amount} — {e['summary']}") + "  \n"
             f"<small>{source_label(e.get('source_type'))} · [source]({e['source_url']})</small>",
             unsafe_allow_html=True,
         )

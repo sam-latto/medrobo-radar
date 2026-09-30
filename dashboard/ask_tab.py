@@ -2,6 +2,7 @@
 import streamlit as st
 
 from pipeline.event_styles import event_label, source_label
+from pipeline.text_utils import md_safe
 
 EXAMPLE_QUESTIONS = [
     "Which surgical robotics companies raised over $100M this year?",
@@ -20,7 +21,7 @@ def _render_sources(cited_events: list[dict], industry_name) -> None:
                             industry_name(e.get("industry_id"))] if x
             )
             st.markdown(
-                f"**[E{e['id']}]** {e.get('company') or 'Unknown'} — {e['summary']}  \n"
+                f"**[E{e['id']}]** {md_safe(e.get('company') or 'Unknown')} — {md_safe(e['summary'])}  \n"
                 f"<small>{meta} · [source]({e['source_url']})</small>",
                 unsafe_allow_html=True,
             )
@@ -28,7 +29,7 @@ def _render_sources(cited_events: list[dict], industry_name) -> None:
 
 def _render_turn(turn: dict, industry_name) -> None:
     with st.chat_message(turn["role"]):
-        st.markdown(turn["content"])
+        st.markdown(md_safe(turn["content"]))
         if turn["role"] == "assistant":
             if turn.get("hit_iteration_cap"):
                 st.caption("Stopped after the maximum number of lookups; the answer may be incomplete.")
