@@ -35,6 +35,8 @@ class IndustryProfile(BaseModel):
     sources: dict[str, dict] = {"tavily": {}}
     watchlist: list[str] = []
     briefing_audience: str = "sophisticated industry investor"
+    # Per-event-type weights for the company momentum score (defaults in pipeline/momentum.py)
+    momentum_weights: dict[str, float] = {}
 
     @field_validator("segments", "event_types")
     @classmethod

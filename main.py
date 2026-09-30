@@ -5,6 +5,7 @@ Usage:
   python main.py run [profile_id] [--force]   # Run pipeline once (all active profiles by default)
   python main.py new-profile "battery storage" # Draft a new industry profile (saved inactive)
   python main.py profiles                      # List industry profiles
+  python main.py backfill-companies            # Link existing events to company records
   python main.py scheduler                     # Start background scheduler only
   python main.py                               # Start scheduler + Streamlit dashboard
 """
@@ -73,6 +74,18 @@ def cmd_new_profile(args: list[str]):
     print("It is saved with active: false. Review it, then set active: true (or activate it in the dashboard).")
 
 
+def cmd_backfill_companies():
+    from database.companies import get_unlinked_events
+    from pipeline.companies import ensure_companies, link_events
+    from profiles.loader import load_profiles
+    init_db()
+    for profile in load_profiles():
+        ensure_companies(profile.watchlist, profile.id)
+    events = get_unlinked_events()
+    print(f"Linking {len(events)} events to companies…")
+    print(f"Linked {link_events(events)} events")
+
+
 def cmd_profiles():
     from profiles.loader import load_profiles
     for p in load_profiles():
@@ -120,6 +133,8 @@ if __name__ == "__main__":
         cmd_new_profile(args)
     elif command == "profiles":
         cmd_profiles()
+    elif command == "backfill-companies":
+        cmd_backfill_companies()
     elif command == "scheduler":
         cmd_scheduler()
     else:

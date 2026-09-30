@@ -202,7 +202,9 @@ segment_options = _union([p.segment_choices for p in selected_profiles])
 event_type_options = _union([p.event_types for p in selected_profiles])
 
 # ── Main content ──────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab_ask = st.tabs(["📋 Event Tracker", "🔔 Notable Events", "📰 Briefing", "💬 Ask"])
+tab1, tab2, tab3, tab_ask, tab_companies = st.tabs(
+    ["📋 Event Tracker", "🔔 Notable Events", "📰 Briefing", "💬 Ask", "🏢 Companies"]
+)
 
 
 # ── Tab 1: Company & Product Tracker ─────────────────────────────────────────
@@ -362,3 +364,9 @@ with tab3:
 with tab_ask:
     from dashboard import ask_tab
     ask_tab.render(industry_id, _industry_name)
+
+
+# ── Tab 5: Companies ──────────────────────────────────────────────────────────
+with tab_companies:
+    from dashboard import companies_tab
+    companies_tab.render(selected_profiles, industry_id)

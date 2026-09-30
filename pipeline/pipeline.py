@@ -1,7 +1,9 @@
 import uuid
 import logging
 from datetime import date
+from database.companies import touch_company
 from database.db import init_db, insert_run, update_run, insert_event, get_all_runs
+from pipeline.companies import ensure_companies, resolve_companies
 from pipeline.search_agent import run_search_agent
 from pipeline.extraction_agent import run_extraction_agent
 from pipeline.synthesis_agent import run_synthesis_agent
@@ -31,6 +33,8 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
     logger.info(f"[{profile.id}] Pipeline run {run_id} started (triggered_by={triggered_by})")
 
     try:
+        ensure_companies(profile.watchlist, profile.id)
+
         # Agent 1 — Search
         raw_results, source_counts = run_search_agent(profile)
         base["source_counts"] = source_counts
@@ -50,10 +54,19 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
         # Agent 3 — Synthesis
         briefing_text, notable_indices = run_synthesis_agent(structured_events, profile)
 
+        # Link events to company records
+        try:
+            company_ids = resolve_companies([e.company for e in structured_events if e.company], profile.id)
+        except Exception as e:
+            logger.error(f"[{profile.id}] Company resolution failed: {e}")
+            company_ids = {}
+
         # Persist events
         for i, event in enumerate(structured_events):
             event.is_notable = i in notable_indices
-            insert_event(run_id, event.model_dump())
+            event.company_id = company_ids.get(event.company)
+            if insert_event(run_id, event.model_dump()) is not None and event.company_id:
+                touch_company(event.company_id, profile.id, event.date)
 
         update_run(run_id, "complete", briefing_text, source_counts)
 

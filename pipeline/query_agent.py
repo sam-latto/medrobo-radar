@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from config import MODEL
+from database import companies as company_db
 from database import queries
+from pipeline.companies import find_companies, normalize_name
 from pipeline.llm import client, thinking_param
 from profiles.loader import load_profiles
 
@@ -85,8 +87,21 @@ BASE_TOOLS = [
     },
 ]
 
-# Extra tools registered by other modules (e.g. get_company): name -> (definition, handler)
-EXTRA_TOOLS: dict[str, tuple[dict, callable]] = {}
+BASE_TOOLS.append({
+    "name": "get_company",
+    "description": (
+        "Look up one company by name: its profile (industries, first/last seen), total disclosed "
+        "funding, regulatory history and full event history. Returns close matches if the name is ambiguous."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Company name, e.g. 'Intuitive Surgical'"},
+            "industry_id": _FILTER_PROPERTIES["industry_id"],
+        },
+        "required": ["name"],
+    },
+})
 
 
 @dataclass
@@ -137,13 +152,31 @@ def run_tool(name: str, args: dict, default_industry_id: str | None) -> dict:
             date_to=args.get("date_to"), limit=args.get("limit", 5),
         )
         return {"briefings": rows}
-    if name in EXTRA_TOOLS:
-        return EXTRA_TOOLS[name][1](args, industry_id)
+    if name == "get_company":
+        return _get_company(args["name"], industry_id)
     raise ValueError(f"Unknown tool: {name}")
 
 
-def _tools() -> list[dict]:
-    return BASE_TOOLS + [definition for definition, _ in EXTRA_TOOLS.values()]
+def _get_company(name: str, industry_id: str | None) -> dict:
+    matches = find_companies(name)
+    if not matches:
+        return {"found": False, "message": f"No company matching '{name}'"}
+    if len(matches) > 1 and normalize_name(matches[0]["name"]) != normalize_name(name):
+        return {"found": False, "close_matches": [m["name"] for m in matches[:8]],
+                "message": "Ambiguous name; call again with one of close_matches"}
+    company = matches[0]
+    events = company_db.get_company_events(company["id"], industry_id=industry_id)
+    funding_rounds = sorted({e["funding_amount"] for e in events
+                             if e["event_type"] == "funding" and e.get("funding_amount")})
+    return {
+        "found": True,
+        "company": {k: company[k] for k in ("id", "name", "industry_ids", "first_seen", "last_seen")},
+        "event_count": len(events),
+        "distinct_disclosed_funding_amounts_usd": funding_rounds,
+        "regulatory_history": [_compact_event(e) for e in events
+                               if e["event_type"] == "regulatory" or e.get("regulatory_status")],
+        "events": [_compact_event(e) for e in events[:60]],
+    }
 
 
 def _system_prompt(default_industry_id: str | None) -> str:
@@ -184,7 +217,7 @@ def ask(question: str, history: list[dict] | None = None,
     previous call); the updated history is returned for the next turn."""
     messages = list(history or []) + [{"role": "user", "content": question}]
     system = _system_prompt(default_industry_id)
-    tools = _tools()
+    tools = BASE_TOOLS
     tool_calls: list[dict] = []
     hit_cap = False
     extra = {}

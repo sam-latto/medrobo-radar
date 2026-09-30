@@ -52,6 +52,17 @@ SCHEMA = """
     CREATE INDEX IF NOT EXISTS idx_events_segment ON events(segment);
     CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
     CREATE INDEX IF NOT EXISTS idx_runs_industry ON pipeline_runs(industry_id, run_date);
+
+    CREATE TABLE IF NOT EXISTS companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL UNIQUE,
+        industry_ids TEXT NOT NULL DEFAULT '[]',   -- JSON list of profile ids
+        website TEXT,
+        first_seen DATE,
+        last_seen DATE
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_company_id ON events(company_id);
 """
 
 

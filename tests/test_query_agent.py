@@ -145,3 +145,22 @@ def test_search_reports_undated_matches(seeded_db):
     out = query_agent.run_tool("search_events", {"event_type": "funding", "undated_only": True}, "healthcare_robotics")
     assert [e["company"] for e in out["events"]] == ["Undated Co"]
     assert "undated_matching_other_filters" not in query_agent.run_tool("search_events", {}, "healthcare_robotics")
+
+
+def test_get_company_tool(seeded_db, monkeypatch):
+    from database import companies as company_db
+    from pipeline import companies
+    monkeypatch.setattr(companies, "call_tool", lambda *a, **k: {"matches": []})
+    companies.link_events(company_db.get_unlinked_events())
+
+    out = query_agent.run_tool("get_company", {"name": "CMR Surgical Ltd"}, "healthcare_robotics")
+    assert out["found"] and out["company"]["name"] == "CMR Surgical"
+    assert out["event_count"] == 2
+    assert out["distinct_disclosed_funding_amounts_usd"] == [200_000_000]
+
+    think = query_agent.run_tool("get_company", {"name": "THINK Surgical"}, "healthcare_robotics")
+    assert think["regulatory_history"][0]["source_type"] == "openfda"
+
+    ambiguous = query_agent.run_tool("get_company", {"name": "Surgical"}, "healthcare_robotics")
+    assert not ambiguous["found"] and "CMR Surgical" in ambiguous["close_matches"]
+    assert not query_agent.run_tool("get_company", {"name": "Nonexistent Robotics Co"}, None)["found"]
