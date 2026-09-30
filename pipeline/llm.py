@@ -16,8 +16,25 @@ _NO_FORCED_TOOL_CHOICE = (
 )
 
 
+_ADAPTIVE_THINKING = (
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+)
+
+
 def _supports_forced_tool_choice(model: str) -> bool:
     return not any(model.startswith(m) for m in _NO_FORCED_TOOL_CHOICE)
+
+
+def thinking_param() -> dict | None:
+    """Adaptive thinking for models that support it; None for older models."""
+    return {"type": "adaptive"} if MODEL.startswith(_ADAPTIVE_THINKING) else None
 
 
 def call_tool(prompt: str, tool: dict, max_tokens: int = 4096, system: str | None = None) -> dict:
