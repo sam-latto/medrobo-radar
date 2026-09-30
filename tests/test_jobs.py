@@ -304,7 +304,7 @@ def test_extract_text_rejects_bad_input():
     ("ashby", "https://jobs.ashbyhq.com/1x/a5cb058a", "a5cb058a"),
 ])
 def test_posting_id_from_url(provider, url, expected):
-    assert collector.posting_id_from_url(provider, url) == expected
+    assert boards.posting_id_from_url(provider, url) == expected
 
 
 def test_search_web_stores_only_found_postings(jobs_env, monkeypatch):
@@ -319,6 +319,7 @@ def test_search_web_stores_only_found_postings(jobs_env, monkeypatch):
          "title": "Strategy Manager", "content": "bank"},
         {"url": "https://jobs.smartrecruiters.com/Intuitive/1-senior-product-manager",
          "title": "Senior Product Manager", "raw_content": "Intuitive PM role"},
+        {"url": "https://jobs.smartrecruiters.com/Vention/2-closed-role", "title": "Closed PM role"},
     ]
 
     class FakeTavily:
@@ -339,6 +340,14 @@ def test_search_web_stores_only_found_postings(jobs_env, monkeypatch):
     monkeypatch.setattr(collector.boards, "fetch_board", lambda provider, token, company=None: [dict(j) for j in board_jobs])
     monkeypatch.setattr(collector.boards, "fetch_workday_posting", fake_workday)
 
+    def fake_smartrecruiters(url, company=None):
+        if "closed-role" in url:
+            return None
+        return {"url": url, "provider": "smartrecruiters", "board_token": "Intuitive", "company": "Intuitive",
+                "title": "Senior Product Manager", "description": "Full SR description"}
+
+    monkeypatch.setattr(collector.boards, "fetch_smartrecruiters_posting", fake_smartrecruiters)
+
     profile = load_profile("healthcare_robotics")
     stored = collector.search_web(profile, ["Product Management"], {"Johnson & Johnson"}, lambda m: None)
     urls = {p["url"]: p for p in jobs_db.list_active_postings(["healthcare_robotics"])}
@@ -347,5 +356,124 @@ def test_search_web_stores_only_found_postings(jobs_env, monkeypatch):
     assert "https://job-boards.greenhouse.io/acme/jobs/1" not in urls  # rest of the board not imported
     jj = urls["https://jj.wd5.myworkdayjobs.com/en-US/JJ/job/Technical-Product-Owner_R-1"]
     assert jj["provider"] == "web" and jj["description"] == "Full JJ text"  # 403 -> search text kept
-    assert urls["https://jobs.smartrecruiters.com/Intuitive/1-senior-product-manager"]["title"] == "Senior Product Manager"
+    sr = urls["https://jobs.smartrecruiters.com/Intuitive/1-senior-product-manager"]
+    assert (sr["provider"], sr["description"]) == ("smartrecruiters", "Full SR description")
+    assert "https://jobs.smartrecruiters.com/Vention/2-closed-role" not in urls  # closed: skipped
     assert jobs_db.list_boards() == []  # no stray boards registered for unrelated companies
+
+
+# ── Closed and moved postings ─────────────────────────────────────────────────
+
+def _http_error(status: int, text: str = ""):
+    import requests
+    resp = requests.Response()
+    resp.status_code = status
+    resp._content = text.encode()
+    return requests.HTTPError(f"{status}", response=resp)
+
+
+class _Resp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_parse_smartrecruiters_posting():
+    data = _json("smartrecruiters_posting.json")
+    p = boards.parse_smartrecruiters_posting(data)
+    assert p["url"] == "https://jobs.smartrecruiters.com/Intuitive/744000111412218-senior-product-manager-downstream-software"
+    assert (p["provider"], p["company"], p["title"]) == ("smartrecruiters", "Intuitive", "Senior Product Manager - Downstream Software")
+    assert p["location"].startswith("Sunnyvale") and p["posted_at"] == "2026-02-25"
+    assert "Job Description" in p["description"] and "<" not in p["description"]
+    assert boards.parse_smartrecruiters_posting({**data, "active": False}) is None
+
+
+def test_smartrecruiters_follows_renamed_account(monkeypatch):
+    # The Vention case: a search engine indexed the URL under the account's old identifier
+    data = {**_json("smartrecruiters_posting.json"),
+            "postingUrl": "https://jobs.smartrecruiters.com/TBD20260831Vention/744000132220949-pm",
+            "company": {"name": "TBD_2026_08_31_Vention", "identifier": "TBD20260831Vention"}}
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+        if "/companies/Vention/" in url:
+            raise _http_error(400, "Provided companyIdentifier (Vention) does not match companyIdentifier "
+                                   "(TBD20260831Vention) from publication.")
+        return _Resp(data)
+
+    monkeypatch.setattr(boards.http, "get", fake_get)
+    old_url = "https://jobs.smartrecruiters.com/Vention/744000132220949-product-manager-robotics"
+    p = boards.fetch_smartrecruiters_posting(old_url)
+    assert calls[1] == "https://api.smartrecruiters.com/v1/companies/TBD20260831Vention/postings/744000132220949"
+    assert p["url"] == "https://jobs.smartrecruiters.com/TBD20260831Vention/744000132220949-pm"
+    assert p["company"] == "Vention"  # placeholder prefix stripped
+    data["active"] = False  # ...and in reality that posting had closed
+    assert boards.fetch_smartrecruiters_posting(old_url) is None
+    assert boards.check_posting({"url": old_url, "provider": "web"}) == (boards.CLOSED, None)
+
+
+@pytest.mark.parametrize("job,raises,expected", [
+    ({"url": "https://job-boards.greenhouse.io/acme/jobs/1", "provider": "greenhouse", "board_token": "acme"}, 404, "closed"),
+    ({"url": "https://job-boards.greenhouse.io/acme/jobs/1", "provider": "greenhouse", "board_token": "acme"}, None, "open"),
+    ({"url": "https://jobs.lever.co/acme/abc", "provider": "lever", "board_token": "acme"}, 404, "closed"),
+    ({"url": "https://apply.workable.com/cobot/j/ABC/", "provider": "web"}, 410, "closed"),
+    ({"url": "https://apply.workable.com/cobot/j/ABC/", "provider": "web"}, 403, "unknown"),
+    ({"url": "https://apply.workable.com/cobot/j/ABC/", "provider": "web"}, None, "open"),
+])
+def test_check_posting(monkeypatch, job, raises, expected):
+    def fake_get(url, **kw):
+        if raises:
+            raise _http_error(raises)
+        return _Resp({})
+
+    monkeypatch.setattr(boards.http, "get", fake_get)
+    assert boards.check_posting(job)[0] == expected
+
+
+def test_check_posting_workday(monkeypatch):
+    url = "https://bostondynamics.wd1.myworkdayjobs.com/Boston_Dynamics/job/Waltham-MA/PM_R2410"
+    monkeypatch.setattr(boards.http, "get", lambda u, **k: _Resp({"jobPostingInfo": {"posted": False}}))
+    assert boards.check_posting({"url": url, "provider": "workday"})[0] == "closed"
+    monkeypatch.setattr(boards.http, "get", lambda u, **k: _Resp(_json("workday_job.json")))
+    status, fresh = boards.check_posting({"url": url, "provider": "workday", "company": "Boston Dynamics"})
+    assert status == "open" and fresh["title"] == "Senior Staff Product Manager-Spot"
+
+
+def test_recheck_postings_closes_and_refreshes(jobs_env, monkeypatch):
+    from profiles.loader import load_profile
+    closed_id = jobs_db.upsert_posting(_posting(1, "PM A", provider="web"), "healthcare_robotics")
+    moved_id = jobs_db.upsert_posting(_posting(2, "PM B", provider="smartrecruiters"), "healthcare_robotics")
+    board_id = jobs_db.upsert_posting(_posting(3, "PM C"), "healthcare_robotics")  # greenhouse: board refresh covers it
+    with db.get_connection() as conn:  # make them look two days old
+        conn.execute("UPDATE job_postings SET last_seen_at = datetime('now', '-2 days')")
+
+    def fake_check(job):
+        if job["id"] == closed_id:
+            return boards.CLOSED, None
+        return boards.OPEN, {**job, "url": "https://ex.com/2-moved", "title": "PM B (updated)"}
+
+    monkeypatch.setattr(collector.boards, "check_posting", fake_check)
+    closed = collector.recheck_postings(load_profile("healthcare_robotics"), lambda m: None)
+    assert closed == 1
+    active = {p["id"]: p for p in jobs_db.list_active_postings()}
+    assert closed_id not in active and board_id in active
+    assert active[moved_id]["url"] == "https://ex.com/2-moved" and active[moved_id]["title"] == "PM B (updated)"
+    # Just re-checked: nothing is due again
+    assert jobs_db.postings_to_recheck("healthcare_robotics", 24, collector.RECHECK_PROVIDERS) == []
+
+
+@pytest.mark.parametrize("search_allowed,expected", [(True, "closed"), (False, "unknown")])
+def test_workday_403_closed_only_if_site_answers(monkeypatch, search_allowed, expected):
+    url = "https://jj.wd5.myworkdayjobs.com/en-US/JJ/job/Santa-Clara/Technical-Product-Manager_R-1"
+
+    def fake_post(u, **kw):
+        if not search_allowed:
+            raise _http_error(403)
+        return _Resp({"jobPostings": []})
+
+    monkeypatch.setattr(boards.http, "get", lambda u, **kw: (_ for _ in ()).throw(_http_error(403)))
+    monkeypatch.setattr(boards.http, "post", fake_post)
+    assert boards.check_posting({"url": url, "provider": "workday"})[0] == expected

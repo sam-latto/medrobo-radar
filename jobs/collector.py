@@ -2,7 +2,6 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
-from urllib.parse import parse_qs, urlparse
 
 from tavily import TavilyClient
 
@@ -133,21 +132,6 @@ def _web_posting(item: dict) -> dict:
     }
 
 
-def posting_id_from_url(provider: str, url: str) -> str | None:
-    """The board's id for one posting URL, to find it in the board's full listing."""
-    parsed = urlparse(url)
-    if provider == "greenhouse":
-        gh_jid = parse_qs(parsed.query).get("gh_jid")
-        if gh_jid:
-            return gh_jid[0]
-    segments = [s for s in parsed.path.split("/") if s]
-    if provider == "greenhouse" and "jobs" in segments and segments.index("jobs") + 1 < len(segments):
-        return segments[segments.index("jobs") + 1]
-    if provider in ("lever", "ashby") and len(segments) >= 2:
-        return segments[1]
-    return None
-
-
 def search_web(profile: IndustryProfile, functions: list[str], company_names: set[str],
                progress: Progress) -> int:
     """Search employer career sites for the target functions; store only the postings found.
@@ -176,9 +160,9 @@ def search_web(profile: IndustryProfile, functions: list[str], company_names: se
             if board and board[0] in ("greenhouse", "lever", "ashby"):
                 if board not in board_cache:
                     board_cache[board] = boards.fetch_board(*board)
-                wanted = posting_id_from_url(board[0], url)
+                wanted = boards.posting_id_from_url(board[0], url)
                 posting = next((p for p in board_cache[board]
-                                if wanted and posting_id_from_url(board[0], p["url"]) == wanted), None)
+                                if wanted and boards.posting_id_from_url(board[0], p["url"]) == wanted), None)
                 if posting is None:
                     continue  # no longer on the board: the job has closed
                 posting["company"] = posting.get("company") or board[1].replace("-", " ").title()
@@ -193,6 +177,14 @@ def search_web(profile: IndustryProfile, functions: list[str], company_names: se
                     # Some Workday sites refuse API requests (403); keep the search result's text
                     logger.info(f"Workday detail unavailable for {url} ({e}); using search text")
                     posting = {**_web_posting(item), "company": company}
+            elif boards.is_smartrecruiters_url(url):
+                try:
+                    posting = boards.fetch_smartrecruiters_posting(url)
+                except Exception as e:
+                    logger.info(f"SmartRecruiters detail unavailable for {url} ({e}); using search text")
+                    posting = _web_posting(item)
+                if posting is None:
+                    continue  # closed: search engines keep indexing expired postings
             else:
                 posting = _web_posting(item)
             if posting:
@@ -201,6 +193,30 @@ def search_web(profile: IndustryProfile, functions: list[str], company_names: se
         except Exception as e:
             logger.warning(f"Could not store job result {url}: {e}")
     return stored
+
+
+RECHECK_AFTER_HOURS = 24
+# Postings no full-board refresh covers; each is re-checked on its own
+RECHECK_PROVIDERS = ("web", "smartrecruiters", "workday")
+
+
+def recheck_postings(profile: IndustryProfile, progress: Progress) -> int:
+    """Re-verify older search-found postings are still open; returns how many closed."""
+    stale = jobs_db.postings_to_recheck(profile.id, RECHECK_AFTER_HOURS, RECHECK_PROVIDERS)
+    if not stale:
+        return 0
+    progress(f"Checking {len(stale)} earlier postings are still open…")
+    closed = 0
+    for job, result in _parallel(boards.check_posting, stale):
+        status, fresh = result or (boards.UNKNOWN, None)
+        if status == boards.CLOSED:
+            jobs_db.mark_posting_closed(job["id"])
+            closed += 1
+        elif status == boards.OPEN:
+            jobs_db.refresh_posting(job["id"], fresh)
+    if closed:
+        progress(f"Removed {closed} postings that have closed")
+    return closed
 
 
 def _industry_boards(companies: list[str]) -> list[dict]:
@@ -233,7 +249,8 @@ def collect_jobs(profile: IndustryProfile, functions: list[str], progress: Progr
                  force: bool = False) -> dict:
     """Refresh job postings for one industry. Returns counts for display."""
     progress = progress or (lambda msg: logger.info(msg))
-    stats = {"boards_found": 0, "boards_fetched": 0, "postings": 0, "web_postings": 0}
+    stats = {"boards_found": 0, "boards_fetched": 0, "postings": 0, "web_postings": 0, "closed": 0}
+    stats["closed"] = recheck_postings(profile, progress)
 
     ranked = [r["company"] for r in rank_companies(profile) if r["score"] > 0][:TOP_MOMENTUM_COMPANIES]
     companies = list(dict.fromkeys(profile.watchlist + ranked))

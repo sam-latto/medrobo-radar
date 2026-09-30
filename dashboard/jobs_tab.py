@@ -2,6 +2,7 @@
 import streamlit as st
 
 from database import jobs_db
+from jobs.boards import CLOSED, OPEN, UNKNOWN, check_posting
 from jobs.functions import FUNCTION_KEYWORDS
 from jobs.resume import ResumeParseError, clean_text, extract_text
 from pipeline.text_utils import md_safe
@@ -148,6 +149,20 @@ def _render_tailoring(t: dict) -> None:
         st.markdown(f"**Cover letter angle.** {md_safe(t['cover_letter_angle'])}")
 
 
+def _posting_status(job: dict) -> str:
+    """Check (once per session) that a posting is still open before showing or tailoring it."""
+    checked = st.session_state.setdefault("posting_status", {})
+    if job["id"] not in checked:
+        with st.spinner("Checking the posting is still open…"):
+            status, fresh = check_posting(job)
+        if status == CLOSED:
+            jobs_db.mark_posting_closed(job["id"])
+        elif status == OPEN:
+            jobs_db.refresh_posting(job["id"], fresh)
+        checked[job["id"]] = status
+    return checked[job["id"]]
+
+
 def _render_job(job: dict, match: dict | None, resume: dict) -> None:
     title = f"{_score_badge(match['score'] if match else None)} · {job['title']} — {job.get('company') or 'Unknown company'}"
     location = job.get("location") or ("Remote" if job.get("remote") == 1 else "")
@@ -155,11 +170,18 @@ def _render_job(job: dict, match: dict | None, resume: dict) -> None:
         title += f" · {location}"
     exp = st.expander(md_safe(title), key=f"job_{job['id']}", on_change="rerun")
     with exp:
+        status = _posting_status(job) if exp.open else OPEN
+        if status == CLOSED:
+            st.warning("This posting has closed or been taken down, so it's been removed from your list.")
+            return
+        job = jobs_db.get_posting(job["id"]) or job  # the check may have refreshed its URL or details
         meta = [job.get("department"), job.get("employment_type"), job.get("compensation"),
                 f"posted {job['posted_at']}" if job.get("posted_at") else None,
                 ", ".join(job.get("functions", [])), job["provider"].title()]
         st.caption(" · ".join(m for m in meta if m))
         st.link_button("Open posting / apply ↗", job["url"])
+        if status == UNKNOWN:
+            st.caption("Couldn't confirm this posting is still open; the link may be out of date.")
         if match:
             level = {"below": "below your level", "match": "at your level", "above": "a step up"}.get(match.get("level_fit"), "")
             st.markdown(f"**Fit {match['score']}/100**{f' · {level}' if level else ''}. {md_safe(match['summary'])}")
@@ -215,7 +237,8 @@ def render(selected_profiles: list, industry_id: str | None, industry_name) -> N
             for profile in selected_profiles:
                 stats = collect_jobs(profile, functions, progress=status.write, force=refresh)
                 status.write(f"{profile.label}: read {stats['boards_fetched']} boards "
-                             f"({stats['postings']} postings), {stats['web_postings']} from search")
+                             f"({stats['postings']} postings), {stats['web_postings']} from search, "
+                             f"{stats['closed']} closed postings removed")
             candidates = candidate_jobs(industry_ids, functions, locations, prefs["include_remote"], prefs["remote_only"])
             status.write(f"{len(candidates)} postings match your functions and location")
             scored = score_jobs(resume, candidates, [p.name for p in selected_profiles], progress=status.write)

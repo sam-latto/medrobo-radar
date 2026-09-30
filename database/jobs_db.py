@@ -1,6 +1,6 @@
 """Storage for the Jobs workflow: boards, postings, resumes, match scores and advice."""
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from database.db import get_connection
 
@@ -77,8 +77,15 @@ JOBS_SCHEMA = """
 """
 
 
+_TS_FORMAT = "%Y-%m-%d %H:%M:%S"  # same as SQLite's CURRENT_TIMESTAMP (UTC)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return _utcnow().strftime(_TS_FORMAT)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -124,7 +131,7 @@ def mark_board_fetched(provider: str, token: str) -> None:
 
 def board_is_fresh(board: dict, max_age_hours: float) -> bool:
     fetched = board.get("last_fetched_at")
-    return bool(fetched) and datetime.fromisoformat(fetched) > datetime.now() - timedelta(hours=max_age_hours)
+    return bool(fetched) and datetime.fromisoformat(fetched) > _utcnow() - timedelta(hours=max_age_hours)
 
 
 def was_board_checked(normalized_name: str, max_age_days: int = 30) -> bool:
@@ -132,7 +139,7 @@ def was_board_checked(normalized_name: str, max_age_days: int = 30) -> bool:
         row = conn.execute(
             "SELECT checked_at FROM job_board_checks WHERE normalized_name = ?", (normalized_name,)
         ).fetchone()
-    return bool(row) and datetime.fromisoformat(row["checked_at"]) > datetime.now() - timedelta(days=max_age_days)
+    return bool(row) and datetime.fromisoformat(row["checked_at"]) > _utcnow() - timedelta(days=max_age_days)
 
 
 def mark_board_checked(normalized_name: str) -> None:
@@ -184,6 +191,40 @@ def deactivate_missing(provider: str, board_token: str, seen_urls: set[str]) -> 
         closed = [r["id"] for r in rows if r["url"] not in seen_urls]
         conn.executemany("UPDATE job_postings SET active = 0 WHERE id = ?", [(i,) for i in closed])
     return len(closed)
+
+
+def mark_posting_closed(job_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE job_postings SET active = 0 WHERE id = ?", (job_id,))
+
+
+def refresh_posting(job_id: int, posting: dict | None) -> None:
+    """Record that a posting is still open, updating its fields (and URL, if it moved)."""
+    with get_connection() as conn:
+        if not posting:
+            conn.execute("UPDATE job_postings SET last_seen_at = ? WHERE id = ?", (_now(), job_id))
+            return
+        updates = {k: posting.get(k) for k in _POSTING_FIELDS if posting.get(k) not in (None, "")}
+        taken = conn.execute("SELECT id FROM job_postings WHERE url = ? AND id != ?",
+                             (posting["url"], job_id)).fetchone()
+        if not taken:  # the posting moved (e.g. a renamed careers account)
+            updates["url"] = posting["url"]
+        sets = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(f"UPDATE job_postings SET {sets}, last_seen_at = ? WHERE id = ?",
+                     [*updates.values(), _now(), job_id])
+
+
+def postings_to_recheck(industry_id: str, older_than_hours: float, providers: tuple[str, ...]) -> list[dict]:
+    """Active postings not seen recently that no board refresh re-verifies."""
+    cutoff = (_utcnow() - timedelta(hours=older_than_hours)).strftime(_TS_FORMAT)
+    placeholders = ",".join("?" for _ in providers)
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM job_postings WHERE active = 1 AND provider IN ({placeholders})
+                AND last_seen_at < ? AND industry_ids LIKE ?""",
+            (*providers, cutoff, f'%"{industry_id}"%'),
+        ).fetchall()
+    return [_posting_row(r) for r in rows]
 
 
 def get_posting(job_id: int) -> dict | None:
