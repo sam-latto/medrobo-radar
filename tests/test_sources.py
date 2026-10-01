@@ -237,6 +237,7 @@ def test_search_agent_runs_sources_and_dedups(monkeypatch):
     }
     monkeypatch.setattr(search_agent, "get_source", fakes.get)
     monkeypatch.setattr(search_agent, "url_exists", lambda url, ind: url.endswith("/3"))
+    monkeypatch.setattr(search_agent, "is_trusted", lambda *a: True)
     results, counts = search_agent.run_search_agent(HEALTH)
 
     assert [r.url for r in results] == ["https://ex.com/1", "https://ex.com/2"]
@@ -250,3 +251,39 @@ def test_profile_agent_offers_every_source():
     from pipeline.profile_agent import build_profile_tool
     offered = build_profile_tool()["input_schema"]["properties"]["sources"]["properties"]
     assert set(offered) == set(SOURCES)
+
+
+def test_search_agent_drops_untrusted_sites(monkeypatch):
+    from pipeline import search_agent
+    from pipeline.models import RawResult
+
+    def raw(url, source_type="tavily"):
+        return RawResult(title="t", url=url, snippet="s", source="x", query_tag="news:other", source_type=source_type)
+
+    class Fake:
+        name = source_type = "tavily"
+        default_lookback_days = 7
+
+        def fetch(self, profile, since):
+            return [raw("https://www.reuters.com/a"), raw("https://www.openpr.com/news/1"),
+                    raw("https://news.mit.edu/b"), raw("https://www.facebook.com/post")]
+
+    monkeypatch.setattr(search_agent, "get_source", lambda name: Fake() if name == "tavily" else None)
+    monkeypatch.setattr(search_agent, "url_exists", lambda url, ind: False)
+    results, counts = search_agent.run_search_agent(HEALTH)
+    assert [r.url for r in results] == ["https://www.reuters.com/a", "https://news.mit.edu/b"]
+    assert counts["tavily"] == {"fetched": 4, "new": 2, "untrusted": 2}
+
+
+def test_trust_levels():
+    from sources.trusted_domains import is_trusted, search_domains, trust_level
+    assert trust_level("https://www.accessdata.fda.gov/x") == "primary"
+    assert trust_level("https://www.globenewswire.com/news-release/1") == "primary"
+    assert trust_level("https://erau.edu/news") == "primary"
+    assert trust_level("https://www.statnews.com/2026/x") == "press"
+    assert trust_level("https://news.medtronic.com/2026-09-01-x") == "primary"
+    assert trust_level("https://www.openpr.com/news/1") is None
+    assert trust_level("https://notreuters.com/x") is None  # suffix must be a whole domain
+    assert trust_level("https://www.mytrade.com/x", ["mytrade.com"]) == "press"
+    assert is_trusted("https://anything.example/x", "pubmed")  # official API source
+    assert "mytrade.com" in search_domains(["mytrade.com"]) and "reuters.com" in search_domains()

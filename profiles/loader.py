@@ -34,6 +34,8 @@ class IndustryProfile(BaseModel):
     notable_rules: NotableRules = NotableRules()
     sources: dict[str, dict] = {"tavily": {}}
     watchlist: list[str] = []
+    # Extra news sites trusted for this industry, on top of sources/trusted_domains.py
+    trusted_domains: list[str] = []
     briefing_audience: str = "sophisticated industry investor"
     # Per-event-type weights for the company momentum score (defaults in pipeline/momentum.py)
     momentum_weights: dict[str, float] = {}

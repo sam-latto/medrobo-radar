@@ -6,6 +6,7 @@ from database.db import url_exists
 from pipeline.models import RawResult
 from profiles.loader import IndustryProfile
 from sources.registry import get_source
+from sources.trusted_domains import is_trusted
 from sources.tavily_source import build_queries  # noqa: F401  (re-exported for callers/tests)
 
 logger = logging.getLogger(__name__)
@@ -14,8 +15,8 @@ logger = logging.getLogger(__name__)
 def run_search_agent(profile: IndustryProfile) -> tuple[list[RawResult], dict[str, dict]]:
     """Returns (new results across all sources, per-source counts).
 
-    Results already stored for this industry, or seen from an earlier source in
-    this run, are dropped. Sources run in profile order; a failing source is
+    Results already stored for this industry, seen from an earlier source in
+    this run, or linking to a site we don't trust, are dropped. Sources run in profile order; a failing source is
     logged and skipped.
     """
     results: list[RawResult] = []
@@ -37,14 +38,21 @@ def run_search_agent(profile: IndustryProfile) -> tuple[list[RawResult], dict[st
             continue
 
         new = []
+        untrusted = 0
         for r in fetched:
+            if not is_trusted(r.url, r.source_type, profile.trusted_domains):
+                untrusted += 1
+                continue
             if r.url in seen_urls or url_exists(r.url, profile.id):
                 continue
             seen_urls.add(r.url)
             new.append(r)
         results.extend(new)
         counts[name] = {"fetched": len(fetched), "new": len(new)}
-        logger.info(f"[{profile.id}] Source {name}: {len(fetched)} fetched, {len(new)} new")
+        if untrusted:
+            counts[name]["untrusted"] = untrusted
+        logger.info(f"[{profile.id}] Source {name}: {len(fetched)} fetched, {len(new)} new, "
+                    f"{untrusted} from untrusted sites dropped")
 
     logger.info(f"[{profile.id}] Search agent found {len(results)} new results")
     return results, counts

@@ -6,6 +6,7 @@ from tavily import TavilyClient
 from config import TAVILY_API_KEY, SEARCH_TIME_RANGE
 from pipeline.models import RawResult
 from profiles.loader import IndustryProfile
+from sources.trusted_domains import search_domains
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class TavilySource:
         # Recency comes from Tavily's time_range filter rather than `since`
         settings = profile.sources.get(self.name, {})
         client = TavilyClient(api_key=TAVILY_API_KEY)
+        trusted = search_domains(profile.trusted_domains)  # only search sites we trust
         results: list[RawResult] = []
 
         for query, query_tag in build_queries(profile):
@@ -54,6 +56,7 @@ class TavilySource:
                     max_results=settings.get("max_results", 5),
                     include_raw_content=False,
                     time_range=settings.get("time_range", SEARCH_TIME_RANGE),
+                    include_domains=trusted,
                 )
             except Exception as e:
                 logger.error(f"Search failed for query '{query}': {e}")
