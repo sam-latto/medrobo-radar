@@ -1,12 +1,12 @@
 import uuid
 import logging
-from datetime import date
+from datetime import date, timedelta
 from database.companies import touch_company
-from database.db import init_db, insert_run, update_run, insert_event, get_all_runs
+from database.db import init_db, insert_run, update_run, insert_event, get_all_runs, get_all_events
 from pipeline.companies import ensure_companies, resolve_companies
 from pipeline.search_agent import run_search_agent
 from pipeline.extraction_agent import run_extraction_agent
-from pipeline.synthesis_agent import run_synthesis_agent
+from pipeline.synthesis_agent import CONTEXT_DAYS, run_synthesis_agent
 from email_digest.sender import send_digests
 from profiles.loader import IndustryProfile, load_profile, load_profiles
 
@@ -57,7 +57,14 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
             if r["status"] == "complete" and r.get("briefing_text") and r["id"] != run_id
             and not r["briefing_text"].startswith("No ")
         ][:3]
-        briefing_text, notable_indices = run_synthesis_agent(structured_events, profile, previous)
+        # Earlier events give the brief its context; this run's events aren't stored yet.
+        context_events = sorted(
+            get_all_events(industry_id=profile.id,
+                           date_from=(date.today() - timedelta(days=CONTEXT_DAYS)).isoformat()),
+            key=lambda e: e.get("date") or "", reverse=True,
+        )
+        briefing_text, notable_indices = run_synthesis_agent(
+            structured_events, profile, previous, context_events)
 
         # Link events to company records
         try:

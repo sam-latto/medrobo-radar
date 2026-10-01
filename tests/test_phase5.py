@@ -61,3 +61,35 @@ def test_failure_alert_email(monkeypatch):
     subject, body = sent[0]
     assert subject == "Industry Radar — pipeline failed (1 industry)"
     assert "physical_ai" in body and "&lt;script&gt;" in body
+
+
+def test_synthesis_includes_context_events(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(synthesis_agent, "call_tool", lambda prompt, tool, **k: (
+        prompts.append(prompt) or {"briefing_text": "b", "additional_notable_indices": []}))
+    events = [ExtractedEvent(event_type="news", summary="s", source_url="u")]
+    synthesis_agent.run_synthesis_agent(events, PROFILE, context_events=[
+        {"date": "2026-08-19", "company": "Vitestro", "event_type": "regulatory",
+         "summary": "Aletta De Novo", "regulatory_status": "De Novo", "source_type": "openfda"},
+        {"date": "2026-09-01", "company": "Medtronic", "event_type": "news",
+         "summary": "Cornerstone deal", "funding_amount": 700_000_000, "source_type": "tavily"},
+    ])
+    assert "2026-08-19 · Vitestro · regulatory: Aletta De Novo (De Novo; openfda)" in prompts[0]
+    assert "($700,000,000; tavily)" in prompts[0]
+    assert "## The bottom line" in prompts[0]
+
+    synthesis_agent.run_synthesis_agent(events, PROFILE)
+    assert "Background: events tracked" not in prompts[1]
+
+
+def test_markdown_to_email_html():
+    from pipeline.text_utils import markdown_to_email_html
+    out = markdown_to_email_html(
+        "# Big news <script>\n*A dek*\n\n## The bottom line\n- **One.** First\n- Two\n\n"
+        "Cleared ([openFDA](https://fda.gov/x)) and [bad](javascript:alert(1)).\n\n1. **Acme** — watch"
+    )
+    assert '<h2 style="font-size:24px' in out and "&lt;script&gt;" in out and "<script>" not in out
+    assert "<em>A dek</em>" in out
+    assert "<ul" in out and "<li style=\"margin:0 0 6px;\"><strong>One.</strong> First</li>" in out
+    assert '<a href="https://fda.gov/x"' in out and 'href="javascript' not in out
+    assert "<ol" in out and "<strong>Acme</strong>" in out

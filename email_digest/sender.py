@@ -14,13 +14,14 @@ from config import (
     DIGEST_MODE,
 )
 from pipeline.event_styles import event_color, event_label
+from pipeline.text_utils import markdown_to_email_html
 
 logger = logging.getLogger(__name__)
 
 
 def _section_html(section: dict, heading_level: int) -> str:
     """One industry: briefing + notable events. `section` is a per-industry run summary."""
-    briefing_html = html.escape(section.get("briefing_text", "")).replace("\n", "<br>")
+    briefing_html = markdown_to_email_html(section.get("briefing_text", ""))
 
     alerts_html = ""
     for e in section.get("notable_events", []):
