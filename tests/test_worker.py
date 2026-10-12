@@ -30,6 +30,8 @@ pytestmark = pytest.mark.skipif(
     os.getenv("RUN_DB_TESTS") != "1" or not DATABASE_URL,
     reason="live database tests; set RUN_DB_TESTS=1 and DATABASE_URL")
 
+GOOGLE_APP_META = json.dumps({"provider": "google", "providers": ["google"]})  # sign-up via Google
+
 TODAY = date.today().isoformat()
 
 
@@ -37,6 +39,15 @@ TODAY = date.today().isoformat()
 def conn():
     c = psycopg.connect(DATABASE_URL, row_factory=dict_row)
     c.execute("select 1")  # open the outer transaction now, so every write is rolled back at the end
+    c.execute("delete from public.subscriptions")
+    c.execute("delete from public.job_preferences")
+    c.execute("delete from public.usage_events where created_at >= date_trunc('month', now())")
+    c.execute("delete from public.cache where key like 'budget_alert:%' or key = 'spend_paused' "
+              "or key like 'digest_sent:%'")
+    today_runs = "select id from public.pipeline_runs where run_date = current_date"
+    c.execute(f"delete from public.briefs where run_id in ({today_runs}) or brief_date = current_date")
+    c.execute(f"delete from public.events where run_id in ({today_runs})")
+    c.execute("delete from public.pipeline_runs where run_date = current_date")
     try:
         yield c
     finally:
@@ -57,9 +68,9 @@ def mail(monkeypatch):
 def new_user(conn, industries=(), opt_in=False):
     user_id = uuid.uuid4()
     email = f"worker-test-{user_id.hex[:8]}@umich.edu"
-    conn.execute("insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data) "
-                 "values (%s, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', %s, %s)",
-                 (user_id, email, json.dumps({})))
+    conn.execute("insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data, raw_app_meta_data) "
+                 "values (%s, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', %s, %s, %s)",
+                 (user_id, email, json.dumps({}), GOOGLE_APP_META))
     conn.execute("update public.profiles set email_brief_opt_in = %s where id = %s", (opt_in, user_id))
     for i in industries:
         conn.execute("insert into public.subscriptions (user_id, industry_id) values (%s, %s)", (user_id, i))
@@ -195,7 +206,7 @@ def test_job_refresh_uses_followers_role_types_and_postgres(conn, monkeypatch):
     monkeypatch.setattr(run_daily, "collect_jobs", fake_collect)
     industry = run_daily.industries_to_run(conn)[0]
     stats = run_daily.refresh_jobs(conn, industry)
-    assert seen["functions"] == ["Product Management", "BizOps", "Strategy"]
+    assert seen["functions"] == ["BizOps", "Product Management", "Strategy"]  # one vote each: alphabetical
     assert isinstance(seen["store"], PgStore) and stats["postings"] == 1
     posting = conn.execute("select remote from public.job_postings where url = 'https://jobs.example.com/1'").fetchone()
     assert posting["remote"] is True
@@ -252,3 +263,95 @@ def test_pg_store_runs_and_companies_match_sqlite_shapes(conn):
         ranking = store().rank_companies(__import__("profiles.loader", fromlist=["load_profile"])
                                          .load_profile("healthcare_robotics"))
     assert ranking and ranking[0]["rank"] == 1
+
+
+# ── Review fixes ─────────────────────────────────────────────────────────────
+
+def _over_budget(conn):
+    conn.execute("insert into public.usage_events (action, cost_usd) values ('llm:test', %s)",
+                 (run_daily.MONTHLY_BUDGET_USD + 1,))
+
+
+def test_paused_budget_skips_new_industries_and_job_search(conn, monkeypatch, mail):
+    fake_pipeline(monkeypatch)
+    for _ in range(3):
+        new_user(conn, ["physical_ai", "industrial_automation"])
+    conn.execute("insert into public.pipeline_runs (industry_id, run_date, triggered_by, status) "
+                 "values ('physical_ai', current_date - 1, 'schedule', 'complete')")
+    conn.execute("delete from public.pipeline_runs where industry_id = 'industrial_automation' "
+                 "and not exists (select 1 from public.events e where e.run_id = pipeline_runs.id) "
+                 "and not exists (select 1 from public.briefs b where b.run_id = pipeline_runs.id)")
+    conn.execute("update public.pipeline_runs set status = 'failed' where industry_id = 'industrial_automation'")
+    _over_budget(conn)
+    refreshed = []
+    monkeypatch.setattr(run_daily, "refresh_jobs", lambda c, i: refreshed.append(i["id"]) or {})
+    summary = run_daily.run(conn, send_email=False)
+    assert [r["id"] for r in summary["industries"]] == ["physical_ai"]  # never-run industry not started
+    assert refreshed == []                                              # no paid job search while paused
+    assert summary["budget"]["paused"] is True
+
+
+def test_one_broken_industry_does_not_stop_the_others(conn, monkeypatch, mail):
+    fake_pipeline(monkeypatch)
+    for _ in range(3):
+        new_user(conn, ["physical_ai", "industrial_automation"], opt_in=True)
+    conn.execute("update public.industries set profile_yaml = 'id: [broken' where id = 'industrial_automation'")
+    summary = run_daily.run(conn, jobs=False)
+    by_id = {r["id"]: r["status"] for r in summary["industries"]}
+    assert by_id == {"industrial_automation": "failed", "physical_ai": "complete"}
+    assert any("pipeline failed" in m["subject"] for m in mail)  # the alert still went out
+    assert summary["emails_sent"] == 3                            # and so did the digests
+
+
+def test_email_outage_does_not_stop_the_run(conn, monkeypatch):
+    from email_digest import sender
+    monkeypatch.setattr(sender, "EMAIL_FROM", "radar@example.com")
+    monkeypatch.setattr(sender, "EMAIL_TO", "owner@example.com")
+    monkeypatch.setattr(sender, "_send", lambda *a, **k: (_ for _ in ()).throw(OSError("smtp down")))
+    conn.execute("insert into public.usage_events (action, cost_usd) values ('llm:test', %s)",
+                 (run_daily.MONTHLY_BUDGET_USD * 0.9,))
+    status = run_daily.check_budget(conn)  # sends the 80% alert, which fails
+    assert status["paused"] is False
+    assert PgStore(conn).get_cache(f"budget_alert:{datetime.now(timezone.utc):%Y-%m}:80") is True
+
+
+def test_zero_budget_pauses_without_crashing(conn, mail):
+    assert run_daily.check_budget(conn, budget=0)["paused"] is True
+
+
+def test_digest_is_sent_once_per_day(conn, monkeypatch, mail):
+    fake_pipeline(monkeypatch)
+    new_user(conn, ["physical_ai"], opt_in=True)
+    run_daily.run(conn, jobs=False)
+    assert run_daily.email_users(conn, TODAY) == 0  # a second run doesn't email again
+    assert len([m for m in mail if "Humanoid" in m["body"]]) == 1
+
+
+def test_role_types_are_ranked_and_capped(conn):
+    for types, custom in [(["Strategy", "Product Management"], "BizOps"),
+                          (["Strategy"], "Chief of Staff, BizOps"),
+                          (["Strategy"], ",".join(f"custom{i}" for i in range(30)))]:
+        user, _ = new_user(conn, ["physical_ai"])
+        conn.execute("insert into public.job_preferences (user_id, role_types, custom_role_types) "
+                     "values (%s, %s, %s)", (user, types, custom))
+    ranked = run_daily.role_types_for(conn, "physical_ai")
+    assert ranked[:2] == ["Strategy", "BizOps"] and len(ranked) == run_daily.MAX_ROLE_TYPES_PER_INDUSTRY
+    assert len(run_daily.role_types_for(conn, "physical_ai", limit=3)) == 3
+
+
+def test_worker_caches_role_type_keywords_in_postgres(conn, monkeypatch):
+    from jobs import functions
+    seen = {}
+
+    def fake_refresh(c, industry):
+        functions._cache["set"]("function_keywords:test role", ["test role"])
+        seen["cached"] = PgStore(conn).get_cache("function_keywords:test role")
+        return {}
+    fake_pipeline(monkeypatch)
+    for _ in range(3):
+        new_user(conn, ["physical_ai"])
+    monkeypatch.setattr(run_daily, "refresh_jobs", fake_refresh)
+    before = functions._cache["get"]
+    run_daily.run(conn, send_email=False)
+    assert seen["cached"] == ["test role"]
+    assert functions._cache["get"] is before  # restored afterwards

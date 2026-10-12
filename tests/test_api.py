@@ -25,6 +25,8 @@ pytestmark = pytest.mark.skipif(
     os.getenv("RUN_DB_TESTS") != "1" or not DATABASE_URL,
     reason="live database tests; set RUN_DB_TESTS=1 and DATABASE_URL")
 
+GOOGLE_APP_META = json.dumps({"provider": "google", "providers": ["google"]})  # sign-up via Google
+
 RESUME_TEXT = ("Sam Example\nProduct manager with 6 years in medical devices and surgical robotics.\n"
                "- Led launch of a robotic surgery analytics product used by 40 hospitals\n"
                "- Built pricing strategy that grew revenue 25%\n") * 3
@@ -75,9 +77,9 @@ def env():
     def new_user(prefix="api-test"):
         user_id = uuid.uuid4()
         conn.execute(
-            "insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data) "
-            "values (%s, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', %s, %s)",
-            (user_id, f"{prefix}-{user_id.hex[:8]}@umich.edu", json.dumps({"full_name": "Test User"})))
+            "insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data, raw_app_meta_data) "
+            "values (%s, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', %s, %s, %s)",
+            (user_id, f"{prefix}-{user_id.hex[:8]}@umich.edu", json.dumps({"full_name": "Test User"}), GOOGLE_APP_META))
         return str(user_id)
 
     try:
@@ -178,13 +180,19 @@ def test_catalog_subscriptions_and_custom_requests(env):
 # ── Briefs, events, companies ────────────────────────────────────────────────
 
 def test_briefs(env):
-    c, user = env["client"], env["new_user"]()
-    brief = c.get("/api/v1/briefs", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()
-    assert brief["brief_date"] == "2026-09-29" and brief["content_md"] and brief["industry_name"]
-    dates = c.get("/api/v1/briefs/dates", headers=auth(user), params={"industry_id": "healthcare_robotics"})
-    assert dates.json()["dates"][:2] == ["2026-09-29", "2026-04-19"]
+    c, conn, user = env["client"], env["conn"], env["new_user"]()
+    conn.execute("delete from public.briefs where industry_id = 'consulting'")
     r = c.get("/api/v1/briefs", headers=auth(user), params={"industry_id": "consulting"})
     assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
+    for day, text in (("2099-01-01", "# Older"), ("2099-01-02", "# Newest")):
+        conn.execute("insert into public.briefs (industry_id, brief_date, headline, content_md) "
+                     "values ('consulting', %s, %s, %s)", (day, text[2:], text))
+    brief = c.get("/api/v1/briefs", headers=auth(user), params={"industry_id": "consulting"}).json()
+    assert brief["brief_date"] == "2099-01-02" and brief["headline"] == "Newest" and brief["industry_name"]
+    older = c.get("/api/v1/briefs", headers=auth(user), params={"industry_id": "consulting", "date": "2099-01-01"})
+    assert older.json()["headline"] == "Older"
+    dates = c.get("/api/v1/briefs/dates", headers=auth(user), params={"industry_id": "consulting"}).json()["dates"]
+    assert dates == ["2099-01-02", "2099-01-01"]
 
 
 def test_events_filters_paging_and_csv(env):
@@ -214,7 +222,8 @@ def test_companies_ranking_profile_and_watchlist(env):
     companies = c.get("/api/v1/companies", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()
     items = companies["items"]
     assert items and [i["rank"] for i in items] == list(range(1, len(items) + 1))
-    assert items == sorted(items, key=lambda i: -i["score"]) or items[0]["score"] >= items[-1]["score"]
+    scores = [i["score"] for i in items]
+    assert scores == sorted(scores, reverse=True)
     top = items[0]
     assert c.put(f"/api/v1/watchlist/{top['company_id']}", headers=auth(user)).status_code == 204
     watched = c.get("/api/v1/companies", headers=auth(user),
@@ -365,8 +374,189 @@ def test_focus_highlights_events_and_brief(env):
     assert {e["id"] for e in everything["items"] if e["matches_focus"]} == {e["id"] for e in focused["items"]}
     brief = c.get("/api/v1/briefs", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()
     assert brief["focus"] == "Surgical robotics" and brief["focus_events"]
-    assert all("surg" in (e["summary"] + (e["company"] or "")).lower() or True for e in brief["focus_events"])
+    from api import focus as focus_mod
+    stems = focus_mod.focus_stems("Surgical robotics", "Healthcare robotics")
+    assert all(focus_mod.matches(e, stems) for e in brief["focus_events"])
     # Without a focus nothing is flagged
     other = env["new_user"]()
     items = c.get("/api/v1/events", headers=auth(other), params=params).json()["items"]
     assert not any(e["matches_focus"] for e in items)
+
+
+def test_momentum_scores_come_from_recent_events(env):
+    from datetime import date, timedelta
+    c, conn, user = env["client"], env["conn"], env["new_user"]()
+    run_id = conn.execute("insert into public.pipeline_runs (industry_id, run_date, triggered_by, status) "
+                          "values ('healthcare_robotics', current_date, 'test', 'complete') returning id").fetchone()["id"]
+    company = conn.execute("insert into public.companies (name, normalized_name) values ('Momentum Test Co', "
+                           "'momentum test co') returning id").fetchone()["id"]
+    conn.execute("insert into public.company_industries values (%s, 'healthcare_robotics')", (company,))
+    recent = date.today() - timedelta(days=5)
+    for n, (kind, amount) in enumerate([("funding", 50_000_000), ("funding", 50_000_000), ("regulatory", None)]):
+        conn.execute("insert into public.events (run_id, industry_id, company_id, company, event_type, segment, date, "
+                     "summary, source_url, funding_amount) values (%s, 'healthcare_robotics', %s, 'Momentum Test Co', "
+                     "%s, 'surgical', %s, 's', %s, %s)", (run_id, company, kind, recent, f"https://x/{n}", amount))
+    items = c.get("/api/v1/companies", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()["items"]
+    row = next(i for i in items if i["company_id"] == company)
+    assert row["score"] > 0 and row["events_90d"] == 3
+    assert row["funding_90d"] == 50_000_000  # the same round reported twice counts once
+    assert row["regulatory_90d"] == 1
+
+
+# ── Review fixes ─────────────────────────────────────────────────────────────
+
+def _scored_search(env, monkeypatch, user):
+    monkeypatch.setattr(matcher, "call_tool", fake_scores([]))
+    upload_resume(env["client"], user)
+    env["client"].put("/api/v1/job-preferences", headers=auth(user),
+                      json={"role_types": ["Product Management"], "industry_ids": ["physical_ai", "healthcare_robotics"]})
+    task = env["client"].post("/api/v1/jobs/search", headers=auth(user)).json()
+    assert env["client"].get(f"/api/v1/tasks/{task['task_id']}", headers=auth(user)).json()["status"] == "complete"
+
+
+def test_matches_filters_and_privacy(env, monkeypatch):
+    c, conn = env["client"], env["conn"]
+    a, b = env["new_user"](), env["new_user"]()
+    _scored_search(env, monkeypatch, a)
+    everything = c.get("/api/v1/jobs/matches", headers=auth(a), params={"page_size": 100}).json()
+    assert everything["total"] > 1
+    closed = everything["items"][0]["job_id"]
+    conn.execute("update public.job_postings set active = false where id = %s", (closed,))
+    open_only = c.get("/api/v1/jobs/matches", headers=auth(a), params={"page_size": 100}).json()
+    assert closed not in {m["job_id"] for m in open_only["items"]}
+    with_closed = c.get("/api/v1/jobs/matches", headers=auth(a), params={"page_size": 100, "include_closed": True})
+    assert closed in {m["job_id"] for m in with_closed.json()["items"]}
+    top = max(m["score"] for m in everything["items"])
+    high = c.get("/api/v1/jobs/matches", headers=auth(a),
+                 params={"min_score": top, "include_closed": True}).json()["items"]
+    assert high and all(m["score"] == top for m in high)
+
+    # Another student sees none of it, and can't tailor with A's resume
+    assert c.get("/api/v1/jobs/matches", headers=auth(b)).json()["total"] == 0
+    a_resume = c.get("/api/v1/resumes", headers=auth(a)).json()["items"][0]["id"]
+    upload_resume(c, b)
+    r = c.post(f"/api/v1/jobs/{closed}/tailor", headers=auth(b), json={"resume_id": a_resume})
+    assert r.json()["error"]["code"] == "no_resume"
+
+
+def test_search_falls_back_to_followed_industries_and_explains_missing_setup(env, monkeypatch):
+    c, user = env["client"], env["new_user"]()
+    monkeypatch.setattr(matcher, "call_tool", fake_scores([]))
+    upload_resume(c, user)
+    assert c.post("/api/v1/jobs/search", headers=auth(user)).json()["error"]["code"] == "no_role_types"
+    c.put("/api/v1/job-preferences", headers=auth(user), json={"role_types": ["Product Management"]})
+    assert c.post("/api/v1/jobs/search", headers=auth(user)).json()["error"]["code"] == "no_industries"
+    c.put("/api/v1/subscriptions", headers=auth(user), json={"industries": [{"industry_id": "physical_ai"}]})
+    task = c.post("/api/v1/jobs/search", headers=auth(user)).json()
+    assert c.get(f"/api/v1/tasks/{task['task_id']}", headers=auth(user)).json()["result"]["scored"] > 0
+
+
+def test_failure_after_paid_work_still_counts(env, monkeypatch):
+    from api.routes import jobs as job_routes
+    from pipeline.llm import usage_sink
+    c, user = env["client"], env["new_user"]()
+    upload_resume(c, user)
+    c.put("/api/v1/job-preferences", headers=auth(user),
+          json={"role_types": ["Product Management"], "industry_ids": ["physical_ai"]})
+
+    def work_that_spends_then_fails(*a):
+        def work(conn, progress):
+            usage_sink.get()({"purpose": "score_jobs", "model": "claude-sonnet-4-6", "input_tokens": 10,
+                              "output_tokens": 1, "cache_creation_tokens": 0, "cache_read_tokens": 0,
+                              "cost_usd": 0.01})
+            raise RuntimeError("resume deleted mid-search")
+        return work
+    monkeypatch.setattr(job_routes, "find_and_score", work_that_spends_then_fails)
+    task = c.post("/api/v1/jobs/search", headers=auth(user)).json()
+    status = c.get(f"/api/v1/tasks/{task['task_id']}", headers=auth(user)).json()
+    assert status["status"] == "failed" and "still counts" in status["error"]
+    assert c.get("/api/v1/me", headers=auth(user)).json()["usage"]["find_jobs"]["used"] == 1
+
+
+def test_double_click_returns_the_running_task(env):
+    c, conn, user = env["client"], env["conn"], env["new_user"]()
+    upload_resume(c, user)
+    job_id = conn.execute("select id from public.job_postings where active order by id limit 1").fetchone()["id"]
+    resume_id = c.get("/api/v1/resumes", headers=auth(user)).json()["items"][0]["id"]
+    running = conn.execute("insert into public.tasks (user_id, kind, status, ref) values (%s, 'tailor_resume', "
+                           "'running', %s) returning id", (user, f"tailor:{job_id}:{resume_id}")).fetchone()["id"]
+    r = c.post(f"/api/v1/jobs/{job_id}/tailor", headers=auth(user)).json()
+    assert r["task_id"] == str(running)
+    assert c.get("/api/v1/me", headers=auth(user)).json()["usage"]["tailor_resume"]["used"] == 0
+
+
+def test_stuck_tasks_are_failed_and_refunded(env):
+    from api.tasks import sweep_stale_tasks
+    conn, user = env["conn"], env["new_user"]()
+    usage_id = conn.execute("insert into public.usage_events (user_id, action) values (%s, 'find_jobs') "
+                            "returning id", (user,)).fetchone()["id"]
+    task_id = conn.execute("insert into public.tasks (user_id, kind, status, usage_id, updated_at) values "
+                           "(%s, 'find_jobs', 'running', %s, now() - interval '2 hours') returning id",
+                           (user, usage_id)).fetchone()["id"]
+    assert sweep_stale_tasks(conn) >= 1
+    assert conn.execute("select status from public.tasks where id = %s", (task_id,)).fetchone()["status"] == "failed"
+    assert conn.execute("select 1 from public.usage_events where id = %s", (usage_id,)).fetchone() is None
+
+
+def test_budget_pause_and_its_expiry(env):
+    c, conn, user = env["client"], env["conn"], env["new_user"]()
+    upload_resume(c, user)
+    job_id = conn.execute("select id from public.job_postings where active order by id limit 1").fetchone()["id"]
+    conn.execute("delete from public.cache where key = 'spend_paused'")
+    conn.execute("insert into public.cache (key, value, expires_at) values ('spend_paused', '{}', now() + interval '1 day')")
+    r = c.post(f"/api/v1/jobs/{job_id}/tailor", headers=auth(user))
+    assert r.status_code == 503 and r.json()["error"]["code"] == "paused"
+    conn.execute("update public.cache set expires_at = now() - interval '1 minute' where key = 'spend_paused'")
+    from jobs import matcher as m
+    m_call = m.call_tool
+    try:
+        m.call_tool = fake_tailoring([])
+        assert c.post(f"/api/v1/jobs/{job_id}/tailor", headers=auth(user)).status_code == 202
+    finally:
+        m.call_tool = m_call
+
+
+def test_upload_limits_and_cleanup(env, monkeypatch):
+    c, admin, user = env["client"], env["admin"], env["new_user"]()
+    big = c.post("/api/v1/resumes", headers=auth(user),
+                 files={"file": ("cv.txt", b"x" * (5 * 1024 * 1024 + 1), "text/plain")})
+    assert big.json()["error"]["code"] == "file_too_large"
+    for _ in range(5):
+        assert upload_resume(c, user).status_code == 201
+    assert upload_resume(c, user).json()["error"]["code"] == "too_many_resumes"
+    assert len(admin.uploaded) == 5
+
+
+def test_delete_account_fails_safely_when_files_cannot_be_removed(env):
+    c, admin, user = env["client"], env["admin"], env["new_user"]()
+    upload_resume(c, user)
+    admin.delete_files = lambda paths: (_ for _ in ()).throw(RuntimeError("storage down"))
+    r = c.delete("/api/v1/me", headers=auth(user))
+    assert r.status_code == 502 and r.json()["error"]["code"] == "delete_failed"
+    assert admin.deleted_users == [] and c.get("/api/v1/me", headers=auth(user)).status_code == 200
+
+
+def test_small_input_errors_are_422_not_500(env):
+    c, user = env["client"], env["new_user"]()
+    r = c.patch("/api/v1/me", headers=auth(user), json={"email_brief_opt_in": None})
+    assert r.status_code == 422
+    r = c.post("/api/v1/industries/requests", headers=auth(user), json={"label": "   "})
+    assert r.status_code == 422
+    r = c.put("/api/v1/job-preferences", headers=auth(user), json={"role_types": ["x" * 101]})
+    assert r.status_code == 422
+
+
+def test_industry_request_keeps_existing_focus_and_cap(env):
+    c, conn, user = env["client"], env["conn"], env["new_user"]()
+    c.put("/api/v1/subscriptions", headers=auth(user),
+          json={"industries": [{"industry_id": "healthcare_robotics", "focus": "Exoskeletons"}]})
+    c.post("/api/v1/industries/requests", headers=auth(user), json={"label": "Surgical robotics"})
+    subs = {s["industry_id"]: s["focus"] for s in c.get("/api/v1/me", headers=auth(user)).json()["subscriptions"]}
+    assert subs["healthcare_robotics"] == "Exoskeletons"
+    ids = [r["id"] for r in conn.execute("select id from public.industries where kind = 'industry' "
+                                         "and id <> 'private_equity' limit 25")]
+    assert len(ids) == 25
+    put = c.put("/api/v1/subscriptions", headers=auth(user), json={"industries": [{"industry_id": i} for i in ids]})
+    assert put.status_code == 200, put.json()
+    r = c.post("/api/v1/industries/requests", headers=auth(user), json={"label": "Private equity buyouts"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "too_many_industries", r.json()

@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 APP_URL = os.getenv("APP_URL", "http://localhost:8501")
 
 
+def safe_url(url: str | None) -> str:
+    """An http(s) URL escaped for an href, or '#' for anything else (javascript:, data:, ...)."""
+    from urllib.parse import urlsplit
+    url = (url or "").strip()
+    return html.escape(url, quote=True) if urlsplit(url).scheme in ("http", "https") else "#"
+
+
 def _section_html(section: dict, heading_level: int) -> str:
     """One industry: briefing + notable events. `section` is a per-industry run summary."""
     briefing_html = markdown_to_email_html(section.get("briefing_text", ""))
@@ -34,7 +41,7 @@ def _section_html(section: dict, heading_level: int) -> str:
         badge = f'<span style="background:{color};color:white;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold;">{html.escape(event_label(event_type))}</span>'
         company = html.escape(e.get("company") or "Unknown")
         summary = html.escape(e.get("summary", ""))
-        url = html.escape(e.get("source_url", "#"), quote=True)
+        url = safe_url(e.get("source_url"))
         alerts_html += f"""
         <div style="border-left:4px solid {color};padding:10px 16px;margin:12px 0;background:#f8fafc;">
             {badge}
@@ -47,7 +54,7 @@ def _section_html(section: dict, heading_level: int) -> str:
         items = "".join(
             f'<li style="margin:6px 0;"><strong>{html.escape(e.get("company") or "")}</strong>'
             f'{" — " if e.get("company") else ""}{html.escape(e.get("summary", ""))} '
-            f'<a href="{html.escape(e.get("source_url", "#"), quote=True)}" style="color:#1E5B72;">Source</a></li>'
+            f'<a href="{safe_url(e.get("source_url"))}" style="color:#1E5B72;">Source</a></li>'
             for e in section.get("focus_events", []))
         focus_html = (f'<div style="background:#E5EEF3;border-radius:8px;padding:12px 16px;margin:16px 0;">'
                       f'<strong>For your focus: {html.escape(section["focus_label"])}</strong>'
@@ -164,8 +171,11 @@ def send_admin_alert(subject: str, body_html: str) -> None:
     if not EMAIL_FROM or not EMAIL_TO:
         logger.warning(f"Alert not emailed (email not configured): {subject}")
         return
-    _send(subject, f'<!DOCTYPE html><html><body style="font-family:sans-serif;color:#1e293b;">'
-                   f"<h2>{html.escape(subject)}</h2>{body_html}</body></html>")
+    try:  # never raises: an email outage must not stop the run that's reporting it
+        _send(subject, f'<!DOCTYPE html><html><body style="font-family:sans-serif;color:#1e293b;">'
+                       f"<h2>{html.escape(subject)}</h2>{body_html}</body></html>")
+    except Exception as e:
+        logger.error(f"Alert email failed ({type(e).__name__}): {subject}")
 
 
 def send_failure_alert(failures: list[tuple[str, str]]) -> None:
@@ -180,6 +190,9 @@ def send_failure_alert(failures: list[tuple[str, str]]) -> None:
     body = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;color:#1e293b;">
 <h2>Industry Radar pipeline failed</h2>
 <p>These industries failed on the scheduled run and again on retry:</p><ul>{items}</ul>
-<p>Check the logs, then re-run with <code>python main.py run &lt;industry&gt;</code>.</p>
+<p>Check the logs, then re-run that industry: locally <code>python main.py run &lt;industry&gt;</code>, hosted <code>python -m worker.run_daily --industry &lt;industry&gt; --force</code>.</p>
 </body></html>"""
-    _send(f"Industry Radar — pipeline failed ({len(failures)} industr{'y' if len(failures) == 1 else 'ies'})", body)
+    try:  # never raises: an email outage must not stop the run that's reporting it
+        _send(f"Industry Radar — pipeline failed ({len(failures)} industr{'y' if len(failures) == 1 else 'ies'})", body)
+    except Exception as e:
+        logger.error(f"Failure alert email failed ({type(e).__name__}): {failures}")

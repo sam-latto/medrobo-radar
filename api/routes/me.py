@@ -43,6 +43,8 @@ def get_me(user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
 @router.patch("/me")
 def update_me(body: ProfileUpdate, user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
     changes = body.model_dump(exclude_unset=True)
+    if "email_brief_opt_in" in changes and changes["email_brief_opt_in"] is None:
+        raise ApiError(422, "invalid_request", "email_brief_opt_in must be true or false.")
     if changes:
         sets = ", ".join(f"{k} = %({k})s" for k in changes)
         with as_user(conn, user.id):

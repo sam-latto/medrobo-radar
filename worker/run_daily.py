@@ -9,6 +9,7 @@ import argparse
 import logging
 import os
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
 import psycopg
@@ -16,11 +17,13 @@ from psycopg.rows import dict_row
 
 from api import focus
 from api.limits import SPEND_PAUSED_KEY, period_bounds
+from api.tasks import sweep_stale_tasks
 from api.usage import UsageCollector
 from config import DATABASE_URL
 from database.pg_store import PgStore
 from database.store import use_store
 from email_digest import sender
+from jobs import functions
 from jobs.collector import collect_jobs
 from pipeline import pipeline
 from pipeline.llm import batch_mode, usage_sink
@@ -35,6 +38,10 @@ LOW_FOLLOWER_THRESHOLD = int(os.getenv("LOW_FOLLOWER_THRESHOLD", "3"))
 LOW_FOLLOWER_EVERY_DAYS = 7
 # Overnight Claude calls go through the Message Batches API at half price.
 USE_BATCH_API = os.getenv("WORKER_USE_BATCH_API", "1") == "1"
+# Career-site searches are paid per role type, so each industry searches only the most
+# requested ones.
+MAX_ROLE_TYPES_PER_INDUSTRY = int(os.getenv("MAX_ROLE_TYPES_PER_INDUSTRY", "10"))
+MAX_CUSTOM_ROLE_TYPES_PER_USER = 10
 
 
 # ── What to run ──────────────────────────────────────────────────────────────
@@ -63,18 +70,22 @@ def due_today(industry: dict, today: date) -> bool:
     return today - industry["last_run_date"] >= timedelta(days=LOW_FOLLOWER_EVERY_DAYS)
 
 
-def role_types_for(conn, industry_id: str) -> list[str]:
-    """Role types job seekers want in this industry (drives the career-site search)."""
+def role_types_for(conn, industry_id: str, limit: int | None = None) -> list[str]:
+    """The role types job seekers in this industry ask for most (drives the paid career-site
+    search). Each user counts once per role type; at most `limit` are returned."""
     rows = conn.execute(
         """select jp.role_types, jp.custom_role_types from public.job_preferences jp
            where %(industry)s = any(jp.industry_ids)
               or (cardinality(jp.industry_ids) = 0 and exists (
                     select 1 from public.subscriptions s where s.user_id = jp.user_id
                     and s.industry_id = %(industry)s))""", {"industry": industry_id}).fetchall()
-    types: list[str] = []
+    from collections import Counter
+    votes: Counter = Counter()
     for r in rows:
-        types += r["role_types"] + [t.strip() for t in r["custom_role_types"].split(",") if t.strip()]
-    return list(dict.fromkeys(types))
+        custom = [t.strip()[:100] for t in r["custom_role_types"].split(",") if t.strip()]
+        votes.update(list(dict.fromkeys(r["role_types"][:20] + custom[:MAX_CUSTOM_ROLE_TYPES_PER_USER])))
+    ranked = [t for t, _ in sorted(votes.items(), key=lambda kv: (-kv[1], kv[0]))]
+    return ranked[:limit or MAX_ROLE_TYPES_PER_INDUSTRY]
 
 
 # ── Steps ────────────────────────────────────────────────────────────────────
@@ -93,6 +104,17 @@ def _with_usage(conn, industry_id: str, fn):
 
 
 def run_industry(conn, industry: dict, run_date: str, force: bool) -> dict:
+    """One industry's pipeline run. Never raises: any error becomes a failed result, so
+    one industry can't stop the others, the alert or the emails."""
+    try:
+        return _run_industry(conn, industry, run_date, force)
+    except Exception as e:
+        logger.exception(f"[{industry['id']}] run crashed")
+        return {"industry_id": industry["id"], "status": "failed", "error": str(e), "events": 0,
+                "run_id": None, "cost_usd": 0.0}
+
+
+def _run_industry(conn, industry: dict, run_date: str, force: bool) -> dict:
     profile = parse_profile(industry["profile_yaml"])
     store = PgStore(conn)
     token = batch_mode.set(USE_BATCH_API)
@@ -109,17 +131,31 @@ def run_industry(conn, industry: dict, run_date: str, force: bool) -> dict:
 
 def refresh_jobs(conn, industry: dict) -> dict:
     profile = parse_profile(industry["profile_yaml"])
-    functions = role_types_for(conn, industry["id"])
+    role_types = role_types_for(conn, industry["id"])
     with use_store(PgStore(conn)):
-        stats, cost = _with_usage(conn, industry["id"], lambda: collect_jobs(profile, functions))
-    return {**stats, "role_types": len(functions), "cost_usd": cost}
+        stats, cost = _with_usage(conn, industry["id"], lambda: collect_jobs(profile, role_types))
+    return {**stats, "role_types": len(role_types), "cost_usd": cost}
+
+
+@contextmanager
+def keyword_cache_in_postgres(conn):
+    """Role-type keyword lists are cached in Postgres (the worker has no local database)."""
+    store = PgStore(conn)
+    previous = (functions._cache["get"], functions._cache["set"])
+    functions.set_keyword_cache(store.get_cache, lambda key, value: store.set_cache(key, value))
+    try:
+        yield
+    finally:
+        functions.set_keyword_cache(*previous)
 
 
 def email_users(conn, run_date: str) -> int:
-    """Send each opted-in user today's briefs for the industries they follow. A user's focus
-    (e.g. "Surgical robotics") adds a short list of matching events from the same run."""
+    """Send each opted-in user today's briefs for the industries they follow, once per day
+    (re-running the worker doesn't email anyone twice). A user's focus (e.g. "Surgical
+    robotics") adds a short list of matching events from the same run."""
+    store = PgStore(conn)
     users = conn.execute(
-        """select p.email, array_agg(s.industry_id order by i.sort_order) as industry_ids,
+        """select p.id, p.email, array_agg(s.industry_id order by i.sort_order) as industry_ids,
                   jsonb_object_agg(s.industry_id, s.focus) filter (where s.focus is not null) as focuses
            from public.profiles p
            join public.subscriptions s on s.user_id = p.id
@@ -147,10 +183,15 @@ def email_users(conn, run_date: str) -> int:
                 section["focus_label"] = label
                 section["focus_events"] = [e for e in run_events[industry_id] if focus.matches(e, stems)][:8]
             sections.append(section)
+        sent_key = f"digest_sent:{run_date}:{u['id']}"
+        if not sections or store.get_cache(sent_key):
+            continue
         try:
-            sent += sender.send_user_digest(u["email"], sections, run_date)
-        except Exception as e:
-            logger.error(f"Digest email failed for one user: {e}")
+            if sender.send_user_digest(u["email"], sections, run_date):
+                store.set_cache(sent_key, True, expires_at=datetime.now(timezone.utc) + timedelta(days=3))
+                sent += 1
+        except Exception as e:  # log the error type only: messages can contain the address
+            logger.error(f"Digest email failed for user {u['id']}: {type(e).__name__}")
     return sent
 
 
@@ -168,12 +209,14 @@ def check_budget(conn, now: datetime | None = None, budget: float = MONTHLY_BUDG
     spent = month_spend(conn, now)
     month = f"{now:%Y-%m}"
     _, month_end = period_bounds("month", now)
+    budget = max(budget, 0.0)  # a zero budget keeps everything paid paused
     status = {"spent_usd": round(spent, 2), "budget_usd": budget, "paused": False}
-    if spent >= budget * BUDGET_WARN_AT and not store.get_cache(f"budget_alert:{month}:80"):
+    if budget and spent >= budget * BUDGET_WARN_AT and not store.get_cache(f"budget_alert:{month}:80"):
+        # Mark it first, so an email outage can't make every run retry (and fail on) the alert
+        store.set_cache(f"budget_alert:{month}:80", True, expires_at=month_end)
         sender.send_admin_alert(
             f"Industry Radar has used {spent / budget:.0%} of this month's budget",
             f"<p>${spent:,.2f} of ${budget:,.0f} spent in {now:%B %Y}.</p>")
-        store.set_cache(f"budget_alert:{month}:80", True, expires_at=month_end)
     if spent >= budget:
         status["paused"] = True
         if not store.get_cache(SPEND_PAUSED_KEY):
@@ -192,6 +235,10 @@ def check_budget(conn, now: datetime | None = None, budget: float = MONTHLY_BUDG
 def run(conn, only: list[str] | None = None, force: bool = False, send_email: bool = True,
         jobs: bool = True, run_date: str | None = None) -> dict:
     run_date = run_date or date.today().isoformat()
+    try:
+        sweep_stale_tasks(conn)
+    except Exception:
+        logger.exception("Stale task sweep failed")
     budget = check_budget(conn)
     industries = industries_to_run(conn, only)
     if not only and not force:
@@ -206,25 +253,36 @@ def run(conn, only: list[str] | None = None, force: bool = False, send_email: bo
             logger.warning(f"Budget reached: not starting new industries {skipped}")
         industries = [i for i in industries if i["has_run_before"]]
 
+    if jobs and budget["paused"]:
+        logger.warning("Budget reached: skipping the job-posting refresh (paid career-site searches)")
+        jobs = False
+
     results = []
-    for industry in industries:
-        logger.info(f"[{industry['id']}] starting")
-        result = run_industry(conn, industry, run_date, force)
-        if result["status"] == "failed":
-            logger.warning(f"[{industry['id']}] failed; retrying once")
-            result = run_industry(conn, industry, run_date, force=True)
-        if jobs and result["status"] != "failed":
-            try:
-                result["jobs"] = refresh_jobs(conn, industry)
-            except Exception as e:
-                logger.exception(f"[{industry['id']}] job refresh failed")
-                result["jobs"] = {"error": str(e)}
-        results.append(result)
+    with keyword_cache_in_postgres(conn):
+        for industry in industries:
+            logger.info(f"[{industry['id']}] starting")
+            result = run_industry(conn, industry, run_date, force)
+            if result["status"] == "failed":
+                logger.warning(f"[{industry['id']}] failed; retrying once")
+                first_cost = result["cost_usd"]
+                result = run_industry(conn, industry, run_date, force=True)
+                result["cost_usd"] = round(result["cost_usd"] + first_cost, 6)
+            if jobs and result["status"] != "failed":
+                try:
+                    result["jobs"] = refresh_jobs(conn, industry)
+                except Exception as e:
+                    logger.exception(f"[{industry['id']}] job refresh failed")
+                    result["jobs"] = {"error": type(e).__name__}
+            results.append(result)
 
     failures = [(r["industry_id"], r.get("error")) for r in results if r["status"] == "failed"]
     if failures:
         sender.send_failure_alert(failures)
-    emailed = email_users(conn, run_date) if send_email else 0
+    try:
+        emailed = email_users(conn, run_date) if send_email else 0
+    except Exception:
+        logger.exception("Sending digests failed")
+        emailed = 0
     summary = {
         "run_date": run_date,
         "industries": [{"id": r["industry_id"], "status": r["status"], "events": r["events"],

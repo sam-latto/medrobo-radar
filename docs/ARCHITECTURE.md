@@ -229,7 +229,8 @@ RLS is turned on for **every** table. Policies:
 | Tables | Read | Write |
 |---|---|---|
 | `communities`, `industries`, `plans` | Any signed-in user | Service role only |
-| `events`, `briefs`, `companies`, `company_industries`, `pipeline_runs` | Any signed-in user | Service role only (worker) |
+| `events`, `briefs`, `companies`, `company_industries` | Any signed-in user | Service role only (worker) |
+| `pipeline_runs` | Nobody (worker bookkeeping; its error details can contain upstream URLs) | Service role only |
 | `job_postings`, `job_posting_industries`, `job_boards` | Any signed-in user | Service role only |
 | `profiles` | Own row (`id = auth.uid()`) | Own row, but not `plan_id` or `community_id` |
 | `subscriptions`, `watchlist`, `resumes`, `job_preferences`, `job_matches`, `resume_advice`, `custom_industry_requests` | Own rows (`user_id = auth.uid()`) | Own rows |
@@ -327,9 +328,36 @@ tasks (id uuid pk, user_id uuid, kind text, status text, progress jsonb,
 Industry data is shared, so pipeline cost grows with the number of followed industries, not users. On top of that:
 
 - **Weekly for small audiences.** Industries with fewer than `LOW_FOLLOWER_THRESHOLD` (3) followers run once a week instead of daily; an industry's first run happens right away.
-- **Message Batches (50% off).** In the worker, extraction and brief writing go through the Claude Message Batches API (`WORKER_USE_BATCH_API=1`). Most batches finish within minutes; one that takes over 90 minutes, or fails to start, falls back to normal calls so the brief still arrives.
-- **Cheaper model for structured steps.** Event extraction and company matching use `EXTRACTION_MODEL` (default Claude Haiku 5.5, $0.10 / $0.50 per million tokens); the brief and the resume features keep `ANTHROPIC_MODEL`. Quality check pending: compare a real run's extraction against the previous model before launch.
+- **Message Batches (50% off).** In the worker, extraction and brief writing go through the Claude Message Batches API (`WORKER_USE_BATCH_API=1`). Most batches finish within minutes. A batch still running after 60 minutes is canceled; requests that already finished are kept (they're billed even when canceled) and only the rest are made directly. A batch that fails to start is made directly. Nothing is paid for twice.
+- **Cheaper model for structured steps.** Event extraction and company matching use `EXTRACTION_MODEL` (default Claude Haiku 5.5, $0.10 / $0.50 per million tokens for prompts up to 100K tokens, which extraction prompts are); the brief and the resume features keep `ANTHROPIC_MODEL`. Quality check pending: compare a real run's extraction against the previous model before launch.
 - **Personalize by filtering, never by rewriting.** A user's focus (e.g. "Surgical robotics" inside Healthcare robotics) never creates a run or a Claude call. It flags matching events (`matches_focus`, `focus_only=true` on `/events`), lists them under the shared brief (`focus_events` on `/briefs`), and adds a short "For your focus" list to that user's email.
+
+---
+
+### Hardening after the multi-agent review (October 2026)
+
+**Option A: the API is the only way into the database.** Supabase's Data API (direct REST access to tables) is turned off for the `public` schema in the dashboard, so students can't write their own rows around the API's limits. The website uses Supabase only for sign-in, so nothing depends on it.
+- *Guard:* `tests/test_supabase_rls.py::test_supabase_rest_access_to_tables_is_off` fails if anyone turns it back on.
+- *Backstop:* `supabase/migrations/20261012000001_limits.sql` makes the database enforce the limits itself: array sizes and text lengths on job preferences, resumes and focus text; resume files only under the owner's folder; at most 5 resumes, 25 followed industries, 50 industry requests and 500 watched companies per user (counted under a lock, so parallel requests can't race past them).
+- *When to move to Option B:* if the website ever needs to read the database directly (e.g. live updates via Supabase Realtime), first give the API its own database role and take write access away from the `authenticated` role. Don't just reopen the Data API.
+
+**Sign-in:** the sign-up trigger accepts only Google sign-ins (`provider = google`) from a community's email domain. In the Supabase dashboard, keep Google as the only enabled provider.
+
+**Usage limits match real spend:**
+- A failed task refunds the user's reservation only if no paid call was made. Otherwise it still counts, so a user can't get repeat refunds by making work fail on purpose.
+- A search where every Claude call failed is reported as failed (and refunded).
+- A double click on Find jobs or Tailor returns the task already running instead of charging twice.
+- Tasks stuck by a restart are failed and refunded after 30 minutes (swept at API startup and by the worker).
+
+**Worker resilience:**
+- One industry's error, or an email outage, never stops the others, the failure alert or the digests.
+- Each opted-in user gets at most one digest per day, even if the worker runs twice.
+- While the budget is paused, the nightly job-posting refresh (paid career-site searches) is skipped too.
+- Career-site searches cover only the 10 role types most requested in each industry (`MAX_ROLE_TYPES_PER_INDUSTRY`).
+- Role-type keyword lists are cached in Postgres.
+- `MONTHLY_BUDGET_USD=0` means "keep paid features paused".
+
+**Emails:** links in briefs can't break out of their `href`, only `http(s)` source links are allowed, and logs never include a recipient's address. Set `APP_URL` in production, or the "Open Industry Radar" link points to localhost.
 
 ---
 
@@ -342,7 +370,7 @@ A one-time script, `scripts/migrate_sqlite_to_postgres.py`, run against the dev 
 3. **Shared data:** copy `pipeline_runs`, `events`, `companies` (+ `company_industries`), `job_boards`, `job_board_checks`, `job_postings` (+ `job_posting_industries`). Move each run's `briefing_text` into `briefs`. Map SQLite integer run ids to new uuids.
 4. **Sam's personal data:** after Sam signs in once (so the account exists), copy `resumes`, `job_matches`, `resume_advice` and the job preferences from `app_settings` with `user_id` = Sam's id. Upload resume files to Storage if the originals are available; otherwise keep the extracted text.
 5. **Subscriptions:** subscribe Sam to the three existing industries.
-6. **Check:** row counts match between SQLite and Postgres for each table; spot-check a brief, an event and a job match in the API.
+6. **Check:** every SQLite row is in Postgres (Postgres can have more once the worker runs); spot-check a brief, an event and a job match in the API. For the owner's personal data after first sign-in, run with `--personal-only --owner-email ...`.
 
 The local SQLite app keeps working until the new app is live, so nothing is lost if the migration needs to be rerun.
 

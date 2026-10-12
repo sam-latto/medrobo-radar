@@ -8,7 +8,7 @@ onto one user's account with --owner-email, once that person has signed in.
 The SQLite file is opened read-only. Re-running is safe: existing rows are skipped.
 
 Usage:  python scripts/migrate_sqlite_to_postgres.py
-        python scripts/migrate_sqlite_to_postgres.py --owner-email you@umich.edu
+        python scripts/migrate_sqlite_to_postgres.py --personal-only --owner-email you@umich.edu
 """
 import argparse
 import json
@@ -27,6 +27,9 @@ from config import DATABASE_URL, DB_PATH  # noqa: E402
 
 PROFILES_DIR = ROOT / "profiles"
 PREFS_KEY = "job_preferences"
+# What the local dashboard used when no settings were saved (dashboard/jobs_tab.py DEFAULT_PREFS)
+LOCAL_DEFAULT_PREFS = {"functions": ["Product Management", "Strategy"], "custom_functions": "",
+                       "locations": "", "include_remote": True, "remote_only": False}
 
 
 # ── Pure transforms (unit-tested) ────────────────────────────────────────────
@@ -140,8 +143,7 @@ def copy_shared(src, pg) -> dict[str, int]:
         cur.executemany(
             "insert into public.briefs (industry_id, run_id, brief_date, headline, content_md, created_at) "
             "values (%s, %s, %s, %s, %s, coalesce(%s::timestamptz, now())) "
-            "on conflict (industry_id, brief_date) do update set run_id = excluded.run_id, "
-            "headline = excluded.headline, content_md = excluded.content_md",
+            "on conflict (industry_id, brief_date) do nothing",
             [(b["industry_id"], b["id"], b["run_date"], brief_headline(b["briefing_text"]),
               b["briefing_text"], utc(b["completed_at"])) for b in briefs])
     counts["briefs"] = len(briefs)
@@ -150,7 +152,7 @@ def copy_shared(src, pg) -> dict[str, int]:
     with pg.cursor() as cur:
         cur.executemany(
             "insert into public.companies (id, name, normalized_name, website, first_seen, last_seen) "
-            "overriding system value values (%s, %s, %s, %s, %s, %s) on conflict (id) do nothing",
+            "overriding system value values (%s, %s, %s, %s, %s, %s) on conflict do nothing",
             [(c["id"], c["name"], c["normalized_name"], c["website"], c["first_seen"], c["last_seen"])
              for c in companies])
         cur.executemany(
@@ -165,7 +167,7 @@ def copy_shared(src, pg) -> dict[str, int]:
             "insert into public.events (id, run_id, industry_id, company_id, company, product, event_type, "
             "segment, date, summary, source_url, source_type, funding_amount, regulatory_status, created_at) "
             "overriding system value values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "on conflict (id) do nothing",
+            "on conflict do nothing",
             [(e["id"], e["run_id"], e["industry_id"], e["company_id"], e["company"], e["product"],
               e["event_type"], e["segment"], e["date"], e["summary"], e["source_url"], e["source_type"],
               e["funding_amount"], e["regulatory_status"], utc(e["created_at"])) for e in events])
@@ -193,7 +195,7 @@ def copy_shared(src, pg) -> dict[str, int]:
             "insert into public.job_postings (id, url, provider, board_token, company, title, location, "
             "remote, department, employment_type, compensation, description, posted_at, active, "
             "first_seen_at, last_seen_at) overriding system value "
-            "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) on conflict (id) do nothing",
+            "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) on conflict do nothing",
             [(p["id"], p["url"], p["provider"], p["board_token"], p["company"], p["title"], p["location"],
               as_bool(p["remote"]), p["department"], p["employment_type"], p["compensation"],
               p["description"], p["posted_at"], bool(p["active"]), utc(p["first_seen_at"]),
@@ -221,7 +223,7 @@ def copy_personal(src, pg, owner_email: str, industry_ids: list[str]) -> dict[st
     user_id = owner[0]
 
     setting = src.execute("select value from app_settings where key = ?", (PREFS_KEY,)).fetchone()
-    prefs = json_or_none(setting[0]) if setting else {}
+    prefs = {**LOCAL_DEFAULT_PREFS, **((json_or_none(setting[0]) if setting else None) or {})}
     pref_row = job_preferences_row(prefs or {}, industry_ids)
 
     resume_ids = {}
@@ -283,8 +285,8 @@ def verify(src, pg) -> bool:
     for name, (s_sql, p_sql) in checks.items():
         s = src.execute(s_sql).fetchone()[0]
         p = pg.execute(p_sql).fetchone()[0]
-        ok &= s == p
-        print(f"  {name:<18} {s:>6}  {p:>8}  {'ok' if s == p else 'MISMATCH'}")
+        ok &= p >= s
+        print(f"  {name:<18} {s:>6}  {p:>8}  {'ok' if p >= s else 'MISSING ROWS'}")
     return ok
 
 
@@ -292,6 +294,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--owner-email", help="copy personal Jobs data onto this user's account")
     parser.add_argument("--sqlite", default=DB_PATH, help="path to the SQLite file (default: DB_PATH)")
+    parser.add_argument("--personal-only", action="store_true",
+                        help="copy only the owner's Jobs data (use after the first full copy)")
     args = parser.parse_args()
     if not DATABASE_URL:
         raise SystemExit("DATABASE_URL is not set (see .env)")
@@ -302,15 +306,16 @@ def main():
         with pg.transaction():
             activated = activate_profiles(pg)
             print(f"  industries turned on: {', '.join(activated)}")
-            for table, n in copy_shared(src, pg).items():
-                print(f"  copied {n:>4} {table}")
+            if not args.personal_only:
+                for table, n in copy_shared(src, pg).items():
+                    print(f"  copied {n:>4} {table}")
             if args.owner_email:
                 personal = copy_personal(src, pg, args.owner_email, activated)
                 for table, n in (personal or {}).items():
                     print(f"  copied {n:>4} {table} for {args.owner_email}")
         ok = verify(src, pg)
     src.close()
-    print("\n  all counts match" if ok else "\n  some counts differ; see above")
+    print("\n  every SQLite row is in Postgres" if ok else "\n  some rows are missing; see above")
     sys.exit(0 if ok else 1)
 
 

@@ -1,5 +1,6 @@
 """Collection stage: run every source plug-in listed in the profile."""
 import logging
+import re
 from datetime import date, timedelta
 
 from database.store import store
@@ -10,6 +11,13 @@ from sources.trusted_domains import is_trusted
 from sources.tavily_source import build_queries  # noqa: F401  (re-exported for callers/tests)
 
 logger = logging.getLogger(__name__)
+
+_URL_QUERY_RE = re.compile(r"(https?://[^\s?#'\"]+)\?[^\s'\"]*")
+
+
+def redact_urls(text: str) -> str:
+    """Drop query strings from URLs in error text; they can carry API keys."""
+    return _URL_QUERY_RE.sub(lambda m: m.group(1) + "?[redacted]", text)
 
 
 def run_search_agent(profile: IndustryProfile) -> tuple[list[RawResult], dict[str, dict]]:
@@ -33,8 +41,9 @@ def run_search_agent(profile: IndustryProfile) -> tuple[list[RawResult], dict[st
         try:
             fetched = source.fetch(profile, since)
         except Exception as e:
-            logger.error(f"[{profile.id}] Source {name} failed: {e}")
-            counts[name] = {"fetched": 0, "new": 0, "error": str(e)}
+            error = redact_urls(str(e))  # e.g. openFDA puts its API key in the URL
+            logger.error(f"[{profile.id}] Source {name} failed: {error}")
+            counts[name] = {"fetched": 0, "new": 0, "error": error}
             continue
 
         new = []

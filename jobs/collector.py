@@ -9,7 +9,7 @@ from tavily import TavilyClient
 from config import TAVILY_API_KEY
 from database.store import store
 from jobs import boards
-from jobs.functions import matching_functions
+from jobs.functions import keyword_matchers, matching_functions
 from pipeline.companies import normalize_name
 from pipeline.llm import record_search
 from profiles.loader import IndustryProfile
@@ -232,7 +232,8 @@ def _fetch_board_into_db(board: dict, profile: IndustryProfile, functions: list[
     provider, token, company = board["provider"], board["token"], board.get("company")
     if provider == "workday":
         postings = []
-        title_ok = lambda title: bool(matching_functions(title, functions))
+        matchers = keyword_matchers(functions)
+        title_ok = lambda title: bool(matching_functions(title, functions, matchers))
         for f in functions:
             postings.extend(boards.search_workday_board(token, f, company, WORKDAY_RESULTS_PER_FUNCTION,
                                                         title_filter=title_ok))

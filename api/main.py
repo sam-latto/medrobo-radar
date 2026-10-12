@@ -28,6 +28,12 @@ def create_app(db=None, verifier=None, admin=None) -> FastAPI:
         previous_cache = (functions._cache["get"], functions._cache["set"])
         cache = PgKeywordCache(app.state.db)
         functions.set_keyword_cache(cache.get, cache.set)
+        try:  # tasks left running by a restart: fail them and refund the user
+            from api.tasks import sweep_stale_tasks
+            with app.state.db.connection() as conn:
+                sweep_stale_tasks(conn)
+        except Exception:
+            logging.getLogger(__name__).exception("Stale task sweep failed")
         yield
         functions.set_keyword_cache(*previous_cache)
         if db is None:

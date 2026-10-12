@@ -213,14 +213,44 @@ def test_call_tools_falls_back_to_direct_calls(monkeypatch, batch_env):
     assert batch_env.records[0]["cost_usd"] == pytest.approx(cost_usd("claude-sonnet-4-6", 1000, 100))
 
 
-def test_call_tools_cancels_slow_batch_and_falls_back(monkeypatch, batch_env):
+def test_slow_batch_keeps_finished_results_and_redoes_only_the_rest(monkeypatch, batch_env):
+    """On timeout: cancel, wait for the batch to end, keep (and record) what finished,
+    and make only the requests it never ran directly, so nothing is paid twice."""
     tool = {"name": "t", "input_schema": {}}
-    fake = FakeBatches([], status_after=10**9)
+
+    class SlowThenCanceled(FakeBatches):
+        def retrieve(self, batch_id):
+            return SimpleNamespace(id=batch_id, processing_status="ended" if self.cancelled else "in_progress")
+
+        def cancel(self, batch_id):
+            self.cancelled = True
+
+    fake = SlowThenCanceled([_batch_result("r0", {"from": "batch"}), _batch_result("r1", kind="canceled")])
     monkeypatch.setattr(llm.client.messages, "batches", fake)
     monkeypatch.setattr(llm, "BATCH_TIMEOUT_MINUTES", 0)
-    monkeypatch.setattr(llm.client.messages, "create", lambda **kw: _tool_message({"direct": True}))
-    assert llm.call_tools([{"prompt": "p", "tool": tool}]) == [{"direct": True}]
+    direct = []
+    monkeypatch.setattr(llm.client.messages, "create",
+                        lambda **kw: direct.append(kw["messages"][0]["content"]) or _tool_message({"from": "direct"}))
+    out = llm.call_tools([{"prompt": "p0", "tool": tool}, {"prompt": "p1", "tool": tool},
+                          {"prompt": "p2", "tool": tool}])  # p2 missing from the results
     assert fake.cancelled
+    assert out == [{"from": "batch"}, {"from": "direct"}, {"from": "direct"}]
+    assert direct == ["p1", "p2"]
+    halves = [r for r in batch_env.records if r["cost_usd"] == pytest.approx(0.5 * cost_usd("claude-sonnet-4-6", 1000, 100))]
+    assert len(halves) == 1 and len(batch_env.records) == 3  # 1 batch result + 2 direct calls
+
+
+def test_batch_errors_are_returned_not_retried(monkeypatch, batch_env):
+    tool = {"name": "t", "input_schema": {}}
+    no_tool = SimpleNamespace(type="succeeded", message=SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="hi")], stop_reason="end_turn",
+        usage=SimpleNamespace(input_tokens=10, output_tokens=5)))
+    fake = FakeBatches([_batch_result("r0", kind="errored"), SimpleNamespace(custom_id="r1", result=no_tool)])
+    monkeypatch.setattr(llm.client.messages, "batches", fake)
+    monkeypatch.setattr(llm.client.messages, "create", lambda **kw: pytest.fail("ran requests should not be redone"))
+    out = llm.call_tools([{"prompt": "a", "tool": tool}, {"prompt": "b", "tool": tool}])
+    assert all(isinstance(o, Exception) for o in out)
+    assert len(batch_env.records) == 1  # the succeeded-without-tool call was still paid for
 
 
 def test_call_tools_without_batch_mode_calls_directly(monkeypatch):

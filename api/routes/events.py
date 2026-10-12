@@ -71,6 +71,12 @@ def select_sql(focus_match: str) -> str:
 """
 
 
+def csv_safe(value) -> str:
+    """Stop spreadsheet apps from running scraped text as a formula."""
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
 def _with_source(rows: list[dict]) -> list[dict]:
     for r in rows:
         r["source_name"] = source_name(r["source_type"], r["source_url"])
@@ -112,8 +118,8 @@ def export_events(industry_id: str | None = None, type: str | None = None, segme
     writer.writerow(["date", "industry", "company", "event_type", "segment", "summary", "funding_usd",
                      "regulatory_status", "source", "source_url"])
     for r in _with_source(rows):
-        writer.writerow([r["date"] or "", r["industry_id"], r["company"] or "", r["event_type"], r["segment"],
-                         r["summary"], r["funding_amount"] or "", r["regulatory_status"] or "",
-                         r["source_name"], r["source_url"]])
+        writer.writerow([csv_safe(v) for v in (
+            r["date"], r["industry_id"], r["company"], r["event_type"], r["segment"], r["summary"],
+            r["funding_amount"], r["regulatory_status"], r["source_name"], r["source_url"])])
     return Response(out.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="events.csv"'})

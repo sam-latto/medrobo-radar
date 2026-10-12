@@ -84,6 +84,14 @@ def _keyword_re(keyword: str) -> re.Pattern:
     return re.compile(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", re.IGNORECASE)
 
 
-def matching_functions(title: str, functions: list[str]) -> list[str]:
+def keyword_matchers(functions: list[str]) -> dict[str, list[re.Pattern]]:
+    """Title patterns per function. Build once per search: looking keywords up is a cache
+    read (and, the first time for a custom function, a Claude call)."""
+    return {f: [_keyword_re(k) for k in keywords_for(f)] for f in dict.fromkeys(functions)}
+
+
+def matching_functions(title: str, functions: list[str],
+                       matchers: dict[str, list[re.Pattern]] | None = None) -> list[str]:
     """Which of `functions` a job title belongs to."""
-    return [f for f in functions if any(_keyword_re(k).search(title or "") for k in keywords_for(f))]
+    matchers = matchers or keyword_matchers(functions)
+    return [f for f in functions if any(p.search(title or "") for p in matchers[f])]

@@ -90,29 +90,49 @@ def call_tool(prompt: str, tool: dict, max_tokens: int = 4096, system: str | Non
 
 batch_mode: contextvars.ContextVar[bool] = contextvars.ContextVar("batch_mode", default=False)
 BATCH_POLL_SECONDS = 20
-BATCH_TIMEOUT_MINUTES = 90
+BATCH_TIMEOUT_MINUTES = 60
+BATCH_CANCEL_WAIT_MINUTES = 10
 BATCH_DISCOUNT = 0.5
+
+
+class _NotRun(Exception):
+    """A batch request that never ran (batch not created, canceled, expired or missing):
+    safe to make directly without paying twice."""
+
+
+def _call_direct(r: dict):
+    try:
+        return call_tool(r["prompt"], r["tool"], max_tokens=r.get("max_tokens", 4096),
+                         system=r.get("system"), model=r.get("model"))
+    except Exception as e:
+        return e
 
 
 def call_tools(requests: list[dict]) -> list:
     """Run several tool calls. Each request has prompt, tool and optionally max_tokens,
-    system, model. Returns, in order, each call's tool input or the Exception it raised."""
-    if batch_mode.get() and requests:
-        try:
-            return _call_tools_batched(requests)
-        except Exception as e:
-            logger.error(f"Message batch failed ({e}); making the calls directly")
-    out = []
-    for r in requests:
-        try:
-            out.append(call_tool(r["prompt"], r["tool"], max_tokens=r.get("max_tokens", 4096),
-                                 system=r.get("system"), model=r.get("model")))
-        except Exception as e:
-            out.append(e)
+    system, model. Returns, in order, each call's tool input or the Exception it raised.
+
+    In batch mode the calls go out as one Message Batch. Requests the batch didn't run
+    (it failed to start, timed out, or they expired) are then made directly; requests it
+    did run are never repeated, so nothing is paid for twice."""
+    if not (batch_mode.get() and requests):
+        return [_call_direct(r) for r in requests]
+    try:
+        out = _call_tools_batched(requests)
+    except Exception as e:
+        logger.error(f"Message batch could not run ({e}); making the calls directly")
+        out = [_NotRun(str(e))] * len(requests)
+    redo = [i for i, o in enumerate(out) if isinstance(o, _NotRun)]
+    if redo:
+        logger.warning(f"Making {len(redo)} call(s) directly that the batch didn't run")
+    for i in redo:
+        out[i] = _call_direct(requests[i])
     return out
 
 
 def _call_tools_batched(requests: list[dict]) -> list:
+    """Submit, wait, and collect. Raises only if the batch couldn't be created (nothing ran).
+    Returns per request: the tool input, an Exception from a request that ran, or _NotRun."""
     import time
 
     params = [_tool_params(r["prompt"], r["tool"], r.get("max_tokens", 4096), r.get("system"),
@@ -120,29 +140,45 @@ def _call_tools_batched(requests: list[dict]) -> list:
     batch = client.messages.batches.create(
         requests=[{"custom_id": f"r{i}", "params": p} for i, p in enumerate(params)])
     logger.info(f"Message batch {batch.id}: {len(requests)} requests submitted")
-    deadline = time.monotonic() + BATCH_TIMEOUT_MINUTES * 60
-    while batch.processing_status != "ended":
-        if time.monotonic() > deadline:
-            client.messages.batches.cancel(batch.id)
-            raise TimeoutError(f"batch {batch.id} still running after {BATCH_TIMEOUT_MINUTES} minutes")
-        time.sleep(BATCH_POLL_SECONDS)
-        batch = client.messages.batches.retrieve(batch.id)
+    out: list = [_NotRun("missing from batch results")] * len(requests)
+    try:
+        deadline = time.monotonic() + BATCH_TIMEOUT_MINUTES * 60
+        while batch.processing_status != "ended":
+            if time.monotonic() > deadline:
+                # Requests that already finished are still billed: cancel, wait for the batch
+                # to end, and keep their results; only the rest get made directly.
+                logger.warning(f"Batch {batch.id} still running after {BATCH_TIMEOUT_MINUTES} minutes; canceling")
+                client.messages.batches.cancel(batch.id)
+                deadline = time.monotonic() + BATCH_CANCEL_WAIT_MINUTES * 60
+                while batch.processing_status != "ended" and time.monotonic() < deadline:
+                    time.sleep(BATCH_POLL_SECONDS)
+                    batch = client.messages.batches.retrieve(batch.id)
+                if batch.processing_status != "ended":
+                    logger.error(f"Batch {batch.id} did not end after canceling; its results are lost")
+                    return out
+                break
+            time.sleep(BATCH_POLL_SECONDS)
+            batch = client.messages.batches.retrieve(batch.id)
 
-    out: list = [RuntimeError("missing from batch results")] * len(requests)
-    for result in client.messages.batches.results(batch.id):
-        i = int(result.custom_id[1:])
-        tool = requests[i]["tool"]
-        if result.result.type == "succeeded":
-            message = result.result.message
-            _record_usage(tool["name"], message, params[i]["model"], discount=BATCH_DISCOUNT)
-            try:
-                out[i] = _tool_input(message, tool)
-            except Exception as e:
-                out[i] = e
-        else:
-            out[i] = RuntimeError(f"batch request {result.result.type}")
+        for result in client.messages.batches.results(batch.id):
+            i = int(result.custom_id[1:])
+            tool = requests[i]["tool"]
+            kind = result.result.type
+            if kind == "succeeded":
+                message = result.result.message
+                _record_usage(tool["name"], message, params[i]["model"], discount=BATCH_DISCOUNT)
+                try:
+                    out[i] = _tool_input(message, tool)
+                except Exception as e:
+                    out[i] = e
+            elif kind in ("canceled", "expired"):
+                out[i] = _NotRun(f"batch request {kind}")
+            else:
+                out[i] = RuntimeError(f"batch request {kind}")
+    except Exception as e:  # keep what was collected; the rest is made directly
+        logger.error(f"Reading batch {batch.id} failed partway ({e})")
     failed = sum(isinstance(o, Exception) for o in out)
-    logger.info(f"Message batch {batch.id} done: {len(out) - failed} succeeded, {failed} failed")
+    logger.info(f"Message batch {batch.id} done: {len(out) - failed} succeeded, {failed} not succeeded")
     return out
 
 

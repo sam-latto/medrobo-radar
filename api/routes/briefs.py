@@ -30,7 +30,8 @@ def get_brief(industry_id: str, date: date | None = None,
         focus_events = []
         if mine and row["run_id"]:
             focus_events = conn.execute(
-                """select id, date, company, event_type, summary, source_url, source_type from public.events
+                """select id, date, company, product, segment, event_type, summary, source_url, source_type
+                   from public.events
                    where run_id = %s and (coalesce(summary, '') || ' ' || coalesce(company, '') || ' ' ||
                          coalesce(product, '') || ' ' || replace(segment, '_', ' ')) ~* %s
                    order by date desc nulls last limit 10""", (row["run_id"], mine["pattern"])).fetchall()
