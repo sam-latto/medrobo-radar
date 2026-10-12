@@ -306,21 +306,30 @@ tasks (id uuid pk, user_id uuid, kind text, status text, progress jsonb,
 
 **Spend controls (budget ~$300/month):**
 - Hard monthly spend limits set in the Anthropic and Tavily consoles.
-- A daily check in the worker sums `usage_events.cost_usd` for the month; at 80% of budget it emails Sam, at 100% it pauses tailoring and new industry pipelines (briefs keep running).
+- A daily check in the worker sums `usage_events.cost_usd` for the month (`MONTHLY_BUDGET_USD`, default 300); at 80% of budget it emails Sam, at 100% it pauses job search, resume tailoring and new industry pipelines until the 1st (briefs keep running). The pause is a `spend_paused` row in the `cache` table that the API checks; the API answers `503 paused`.
 
 ---
 
 ## 8. Pipeline worker
 
-`worker/run_daily.py`, run once a day by a Render cron job (early morning US Eastern), replaces the APScheduler in `main.py`.
+`python -m worker.run_daily`, run once a day by a Render cron job (early morning US Eastern), replaces the APScheduler in `main.py` for the hosted app. `--dry-run` lists what would run and the month's spend without changing anything; `--industry X --force --no-email --no-jobs` runs one industry by hand.
 
-1. Find industries to run: `status = 'active'`, has `profile_yaml`, and has at least one subscriber.
-2. For each, call the existing `run_pipeline` logic (collect → extract → companies → brief) against Postgres. Industries run one after another to stay within API rate limits.
-3. Recheck job postings for closed/moved roles (existing `recheck_postings`).
-4. Send the daily email to users with `email_brief_opt_in = true`, one email per user covering their industries.
-5. Write the run's cost to `pipeline_runs.cost_usd`, run the budget check, and send a failure alert if any industry failed (existing retry/alert logic).
+1. **Budget check first.** If this month's spend has reached the budget, industries that have never run aren't started (existing briefs keep running).
+2. **Find industries to run:** `kind = 'industry'`, `status = 'active'`, has `profile_yaml`, and at least one follower.
+3. **Run each one** with the existing pipeline code (search → extract → companies → brief), pointed at Postgres: the pipeline, company and job code read the current data store (`database/store.py`), which is SQLite for the local app and `PgStore` (`database/pg_store.py`) for the worker. A failed industry is retried once.
+4. **Refresh job postings** for each industry (existing `collect_jobs`): re-check older postings, read the job boards of tracked companies, and search career sites for the role types that the industry's followers chose. Users' job searches then score these stored postings.
+5. **Email** each user with `email_brief_opt_in = true` one digest of today's briefs for the industries they follow.
+6. **Record cost:** every Claude call and Tavily search is written to `usage_events` against the industry, and each run's total goes to `pipeline_runs.cost_usd`. Search cost is an estimate from credits (`TAVILY_USD_PER_CREDIT`, default $0.008; advanced searches are 2 credits).
+7. **Alerts** (to `EMAIL_TO`): industries that failed twice; 80% of the monthly budget used (once a month); budget reached.
 
-Custom focuses (e.g. "Surgical robotics" inside Healthcare robotics) don't create new runs. They filter what that user sees and are passed to brief writing as an extra emphasis later if needed.
+### Cost design
+
+Industry data is shared, so pipeline cost grows with the number of followed industries, not users. On top of that:
+
+- **Weekly for small audiences.** Industries with fewer than `LOW_FOLLOWER_THRESHOLD` (3) followers run once a week instead of daily; an industry's first run happens right away.
+- **Message Batches (50% off).** In the worker, extraction and brief writing go through the Claude Message Batches API (`WORKER_USE_BATCH_API=1`). Most batches finish within minutes; one that takes over 90 minutes, or fails to start, falls back to normal calls so the brief still arrives.
+- **Cheaper model for structured steps.** Event extraction and company matching use `EXTRACTION_MODEL` (default Claude Haiku 5.5, $0.10 / $0.50 per million tokens); the brief and the resume features keep `ANTHROPIC_MODEL`. Quality check pending: compare a real run's extraction against the previous model before launch.
+- **Personalize by filtering, never by rewriting.** A user's focus (e.g. "Surgical robotics" inside Healthcare robotics) never creates a run or a Claude call. It flags matching events (`matches_focus`, `focus_only=true` on `/events`), lists them under the shared brief (`focus_events` on `/briefs`), and adds a short "For your focus" list to that user's email.
 
 ---
 
@@ -356,7 +365,7 @@ The local SQLite app keeps working until the new app is live, so nothing is lost
 
 ---
 
-**Running the API locally:** `uvicorn api.main:app --reload`, then open http://localhost:8000/api/v1/docs. End-to-end tests: `RUN_DB_TESTS=1 python -m pytest tests/test_api.py tests/test_supabase_rls.py` (run against dev in a rolled-back transaction, with Claude and Supabase Storage faked).
+**Running the API locally:** `uvicorn api.main:app --reload`, then open http://localhost:8000/api/v1/docs. End-to-end tests: `RUN_DB_TESTS=1 python -m pytest tests/test_api.py tests/test_supabase_rls.py tests/test_worker.py` (run against dev in a rolled-back transaction, with Claude and Supabase Storage faked).
 
 ---
 

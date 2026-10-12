@@ -32,6 +32,9 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# Cheaper model for high-volume, structured steps (event extraction, company matching).
+# The brief and resume features keep MODEL.
+EXTRACTION_MODEL = os.getenv("EXTRACTION_MODEL", "claude-haiku-5-5")
 
 # Primary data sources. SEC requires a descriptive User-Agent with a contact email.
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "")

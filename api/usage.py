@@ -29,7 +29,7 @@ class UsageCollector:
             cur.executemany(
                 "insert into public.usage_events (user_id, industry_id, action, model, input_tokens, "
                 "output_tokens, cost_usd) values (%s, %s, %s, %s, %s, %s, %s)",
-                [(user_id, industry_id, f"llm:{r['purpose']}", r["model"],
+                [(user_id, industry_id, f"{r.get('kind', 'llm')}:{r['purpose']}", r["model"],
                   r["input_tokens"] + r["cache_creation_tokens"] + r["cache_read_tokens"],
                   r["output_tokens"], r["cost_usd"]) for r in records])
         return len(records)

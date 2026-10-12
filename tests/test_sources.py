@@ -194,7 +194,7 @@ def test_extraction_prefers_primary_facts_and_drops_off_topic(monkeypatch):
     news = _raw(2)
     prompts = []
 
-    def fake_call_tool(prompt, tool, max_tokens=4096, system=None):
+    def fake_call_tool(prompt, tool, max_tokens=4096, system=None, **kwargs):
         prompts.append(prompt)
         return {"events": [
             # model gets the amount/company wrong; primary facts must win
@@ -204,7 +204,7 @@ def test_extraction_prefers_primary_facts_and_drops_off_topic(monkeypatch):
             # result 1 omitted entirely -> built from its prefilled facts
         ]}
 
-    monkeypatch.setattr(extraction_agent, "call_tool", fake_call_tool)
+    monkeypatch.setattr("pipeline.llm.call_tool", fake_call_tool)
     events = {e.source_url: e for e in extraction_agent.run_extraction_agent([fda, form_d, news], HEALTH)}
 
     assert "Authoritative facts from the primary source" in prompts[0]
@@ -236,7 +236,7 @@ def test_search_agent_runs_sources_and_dedups(monkeypatch):
         "sec_form_d": Fake("sec_form_d", fail=True),
     }
     monkeypatch.setattr(search_agent, "get_source", fakes.get)
-    monkeypatch.setattr(search_agent, "url_exists", lambda url, ind: url.endswith("/3"))
+    monkeypatch.setattr("database.db.url_exists", lambda url, ind: url.endswith("/3"))
     monkeypatch.setattr(search_agent, "is_trusted", lambda *a: True)
     results, counts = search_agent.run_search_agent(HEALTH)
 
@@ -269,7 +269,7 @@ def test_search_agent_drops_untrusted_sites(monkeypatch):
                     raw("https://news.mit.edu/b"), raw("https://www.facebook.com/post")]
 
     monkeypatch.setattr(search_agent, "get_source", lambda name: Fake() if name == "tavily" else None)
-    monkeypatch.setattr(search_agent, "url_exists", lambda url, ind: False)
+    monkeypatch.setattr("database.db.url_exists", lambda url, ind: False)
     results, counts = search_agent.run_search_agent(HEALTH)
     assert [r.url for r in results] == ["https://www.reuters.com/a", "https://news.mit.edu/b"]
     assert counts["tavily"] == {"fetched": 4, "new": 2, "untrusted": 2}

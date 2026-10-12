@@ -19,7 +19,7 @@ def _raw(i: int) -> RawResult:
 def test_extraction_batches_and_maps_results(monkeypatch):
     calls = []
 
-    def fake_call_tool(prompt, tool, max_tokens=4096, system=None):
+    def fake_call_tool(prompt, tool, max_tokens=4096, system=None, **kwargs):
         n = prompt.count("[id=")
         calls.append(n)
         return {
@@ -29,7 +29,7 @@ def test_extraction_batches_and_maps_results(monkeypatch):
             ]
         }
 
-    monkeypatch.setattr(extraction_agent, "call_tool", fake_call_tool)
+    monkeypatch.setattr("pipeline.llm.call_tool", fake_call_tool)
     monkeypatch.setattr(extraction_agent, "EXTRACTION_BATCH_SIZE", 15)
 
     raw = [_raw(i) for i in range(40)]
@@ -41,14 +41,14 @@ def test_extraction_batches_and_maps_results(monkeypatch):
 
 
 def test_extraction_retries_failed_batch_per_item(monkeypatch):
-    def fake_call_tool(prompt, tool, max_tokens=4096, system=None):
+    def fake_call_tool(prompt, tool, max_tokens=4096, system=None, **kwargs):
         if prompt.count("[id=") > 1:
             raise RuntimeError("batch blew up")
         if "Title 2" in prompt:
             raise RuntimeError("bad item")
         return {"events": [{"result_id": 0, "event_type": "news", "segment": "other", "summary": "ok"}]}
 
-    monkeypatch.setattr(extraction_agent, "call_tool", fake_call_tool)
+    monkeypatch.setattr("pipeline.llm.call_tool", fake_call_tool)
     raw = [_raw(i) for i in range(4)]
     events = extraction_agent.run_extraction_agent(raw, PROFILE)
 
@@ -57,8 +57,7 @@ def test_extraction_retries_failed_batch_per_item(monkeypatch):
 
 def test_extraction_ignores_bad_result_ids(monkeypatch):
     monkeypatch.setattr(
-        extraction_agent,
-        "call_tool",
+        "pipeline.llm.call_tool",
         lambda *a, **k: {
             "events": [
                 {"result_id": 0, "event_type": "news", "segment": "other", "summary": "a"},
@@ -78,8 +77,7 @@ def test_synthesis_uses_tool_output(monkeypatch):
         ExtractedEvent(event_type="launch", segment="other", summary="l", source_url="u2"),
     ]
     monkeypatch.setattr(
-        synthesis_agent,
-        "call_tool",
+        "pipeline.llm.call_tool",
         lambda *a, **k: {"briefing_text": "Hello briefing", "additional_notable_indices": [2, 7]},
     )
     text, notable = synthesis_agent.run_synthesis_agent(events, PROFILE)

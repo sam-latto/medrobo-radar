@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
+from api import focus
 from api.auth import CurrentUser, current_user
 from api.db import as_user
 from api.deps import get_conn
@@ -31,9 +32,12 @@ def source_name(source_type: str, url: str) -> str:
 
 
 def event_filters(user_id, industry_id: str | None, event_type: str | None, segment: str | None,
-                  date_from: date | None, date_to: date | None, q: str | None) -> tuple[str, dict]:
+                  date_from: date | None, date_to: date | None, q: str | None,
+                  focus_match: str | None = None) -> tuple[str, dict]:
     clauses = []
     params: dict = {"user": user_id}
+    if focus_match:
+        clauses.append(focus_match)
     if industry_id:
         clauses.append("e.industry_id = %(industry)s")
         params["industry"] = industry_id
@@ -57,10 +61,11 @@ def event_filters(user_id, industry_id: str | None, event_type: str | None, segm
     return " and ".join(clauses), params
 
 
-SELECT = """
+def select_sql(focus_match: str) -> str:
+    return f"""
     select e.id, e.date, e.industry_id, e.company, e.company_id, e.product, e.event_type, e.segment,
            e.summary, e.source_url, e.source_type, e.funding_amount, e.regulatory_status,
-           (w.company_id is not null) as watching
+           (w.company_id is not null) as watching, {focus_match} as matches_focus
     from public.events e
     left join public.watchlist w on w.company_id = e.company_id and w.user_id = %(user)s
 """
@@ -76,14 +81,18 @@ def _with_source(rows: list[dict]) -> list[dict]:
 def list_events(industry_id: str | None = None, type: str | None = None, segment: str | None = None,
                 date_from: date | None = Query(default=None, alias="from"),
                 date_to: date | None = Query(default=None, alias="to"),
-                q: str | None = None, page: int = Query(default=1, ge=1),
+                q: str | None = None, focus_only: bool = False, page: int = Query(default=1, ge=1),
                 page_size: int = Query(default=25, ge=1, le=100),
                 user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
-    where, params = event_filters(user.id, industry_id, type, segment, date_from, date_to, q)
     with as_user(conn, user.id):
+        focus_params: dict = {}
+        focus_match = focus.focus_sql(focus.user_focuses(conn, user.id), focus_params)
+        where, params = event_filters(user.id, industry_id, type, segment, date_from, date_to, q,
+                                      focus_match if focus_only else None)
+        params.update(focus_params)
         total = conn.execute(f"select count(*) as n from public.events e where {where}", params).fetchone()["n"]
         rows = conn.execute(
-            f"{SELECT} where {where} order by e.date desc nulls last, e.id desc "
+            f"{select_sql(focus_match)} where {where} order by e.date desc nulls last, e.id desc "
             "limit %(limit)s offset %(offset)s",
             {**params, "limit": page_size, "offset": (page - 1) * page_size}).fetchall()
     return {"items": _with_source(rows), "total": total, "page": page, "page_size": page_size}
@@ -96,8 +105,8 @@ def export_events(industry_id: str | None = None, type: str | None = None, segme
                   q: str | None = None, user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
     where, params = event_filters(user.id, industry_id, type, segment, date_from, date_to, q)
     with as_user(conn, user.id):
-        rows = conn.execute(f"{SELECT} where {where} order by e.date desc nulls last, e.id desc limit {CSV_LIMIT}",
-                            params).fetchall()
+        rows = conn.execute(f"{select_sql('false')} where {where} order by e.date desc nulls last, e.id desc "
+                            f"limit {CSV_LIMIT}", params).fetchall()
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["date", "industry", "company", "event_type", "segment", "summary", "funding_usd",

@@ -2,7 +2,7 @@
 import logging
 from datetime import date, timedelta
 
-from database.db import url_exists
+from database.store import store
 from pipeline.models import RawResult
 from profiles.loader import IndustryProfile
 from sources.registry import get_source
@@ -43,7 +43,7 @@ def run_search_agent(profile: IndustryProfile) -> tuple[list[RawResult], dict[st
             if not is_trusted(r.url, r.source_type, profile.trusted_domains):
                 untrusted += 1
                 continue
-            if r.url in seen_urls or url_exists(r.url, profile.id):
+            if r.url in seen_urls or store().url_exists(r.url, profile.id):
                 continue
             seen_urls.add(r.url)
             new.append(r)

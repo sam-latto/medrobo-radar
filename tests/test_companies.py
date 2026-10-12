@@ -42,7 +42,7 @@ def test_near_matches_are_confirmed_by_claude(fresh_db, monkeypatch):
     ids = companies.resolve_companies(["Intuitive Surgical", "Figure AI"], "healthcare_robotics")
     prompts = []
 
-    def fake_call_tool(prompt, tool, max_tokens=4096, system=None):
+    def fake_call_tool(prompt, tool, max_tokens=4096, system=None, **kwargs):
         prompts.append(prompt)
         # [0] "Intuitive" is the same company; [1] "Figure AI Robotics Lab" is not
         return {"matches": [{"index": 0, "company_id": ids["Intuitive Surgical"]},

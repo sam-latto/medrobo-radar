@@ -1,4 +1,5 @@
 """Collect job postings for an industry from company job boards and the web."""
+import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
@@ -6,12 +7,11 @@ from typing import Callable
 from tavily import TavilyClient
 
 from config import TAVILY_API_KEY
-from database import companies as company_db
-from database import jobs_db
+from database.store import store
 from jobs import boards
 from jobs.functions import matching_functions
 from pipeline.companies import normalize_name
-from pipeline.momentum import rank_companies
+from pipeline.llm import record_search
 from profiles.loader import IndustryProfile
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def names_match(board_name: str, company: str) -> bool:
 def discover_boards(company: str) -> list[tuple[str, str]]:
     """Find a company's Greenhouse/Lever/Ashby board by trying slugs of its name (cached)."""
     norm = normalize_name(company)
-    if not norm or jobs_db.was_board_checked(norm):
+    if not norm or store().was_board_checked(norm):
         return []
     full, candidates = slug_candidates(company)
     found: list[tuple[str, str]] = []
@@ -88,8 +88,8 @@ def discover_boards(company: str) -> list[tuple[str, str]]:
             pass
 
     for provider, token in found:
-        jobs_db.upsert_board(provider, token, company)
-    jobs_db.mark_board_checked(norm)
+        store().upsert_board(provider, token, company)
+    store().mark_board_checked(norm)
     if found:
         logger.info(f"Found job boards for {company}: {found}")
     return found
@@ -97,7 +97,7 @@ def discover_boards(company: str) -> list[tuple[str, str]]:
 
 def _company_for_tenant(tenant: str, company_names: set[str]) -> str | None:
     """Workday tenants are usually the company name squashed: 'bostondynamics' -> Boston Dynamics."""
-    for name in company_names | {c["name"] for c in company_db.list_companies()}:
+    for name in company_names | {c["name"] for c in store().list_companies()}:
         if normalize_name(name).replace(" ", "") == tenant.lower():
             return name
     return None
@@ -143,8 +143,11 @@ def search_web(profile: IndustryProfile, functions: list[str], company_names: se
     client = TavilyClient(api_key=TAVILY_API_KEY)
     queries = _web_queries(profile, functions)
     progress(f"Searching career sites ({len(queries)} searches)…")
-    search = lambda q: client.search(query=q, search_depth="advanced", max_results=WEB_RESULTS_PER_QUERY,
-                                     include_domains=CAREER_DOMAINS, include_raw_content=True).get("results", [])
+    def search(q):
+        results = client.search(query=q, search_depth="advanced", max_results=WEB_RESULTS_PER_QUERY,
+                                include_domains=CAREER_DOMAINS, include_raw_content=True).get("results", [])
+        record_search("job_search", "advanced")
+        return results
     items = {}
     for _, results in _parallel(search, queries, workers=4):
         for item in results or []:
@@ -170,7 +173,7 @@ def search_web(profile: IndustryProfile, functions: list[str], company_names: se
                 company = _company_for_tenant(board[1].split("|")[1], company_names)
                 if company in company_names:
                     # A tracked company's Workday site: search it by function on every refresh
-                    jobs_db.upsert_board("workday", board[1], company)
+                    store().upsert_board("workday", board[1], company)
                 try:
                     posting = boards.fetch_workday_posting(url, company)
                 except Exception as e:
@@ -188,7 +191,7 @@ def search_web(profile: IndustryProfile, functions: list[str], company_names: se
             else:
                 posting = _web_posting(item)
             if posting:
-                jobs_db.upsert_posting(posting, profile.id)
+                store().upsert_posting(posting, profile.id)
                 stored += 1
         except Exception as e:
             logger.warning(f"Could not store job result {url}: {e}")
@@ -202,7 +205,7 @@ RECHECK_PROVIDERS = ("web", "smartrecruiters", "workday")
 
 def recheck_postings(profile: IndustryProfile, progress: Progress) -> int:
     """Re-verify older search-found postings are still open; returns how many closed."""
-    stale = jobs_db.postings_to_recheck(profile.id, RECHECK_AFTER_HOURS, RECHECK_PROVIDERS)
+    stale = store().postings_to_recheck(profile.id, RECHECK_AFTER_HOURS, RECHECK_PROVIDERS)
     if not stale:
         return 0
     progress(f"Checking {len(stale)} earlier postings are still open…")
@@ -210,10 +213,10 @@ def recheck_postings(profile: IndustryProfile, progress: Progress) -> int:
     for job, result in _parallel(boards.check_posting, stale):
         status, fresh = result or (boards.UNKNOWN, None)
         if status == boards.CLOSED:
-            jobs_db.mark_posting_closed(job["id"])
+            store().mark_posting_closed(job["id"])
             closed += 1
         elif status == boards.OPEN:
-            jobs_db.refresh_posting(job["id"], fresh)
+            store().refresh_posting(job["id"], fresh)
     if closed:
         progress(f"Removed {closed} postings that have closed")
     return closed
@@ -222,7 +225,7 @@ def recheck_postings(profile: IndustryProfile, progress: Progress) -> int:
 def _industry_boards(companies: list[str]) -> list[dict]:
     """Boards of companies this industry tracks: the only boards read in full."""
     wanted = {normalize_name(c) for c in companies}
-    return [b for b in jobs_db.list_boards() if b.get("company") and normalize_name(b["company"]) in wanted]
+    return [b for b in store().list_boards() if b.get("company") and normalize_name(b["company"]) in wanted]
 
 
 def _fetch_board_into_db(board: dict, profile: IndustryProfile, functions: list[str]) -> int:
@@ -238,10 +241,10 @@ def _fetch_board_into_db(board: dict, profile: IndustryProfile, functions: list[
         for p in postings:
             p["company"] = p.get("company") or company
     for p in postings:
-        jobs_db.upsert_posting(p, profile.id)
+        store().upsert_posting(p, profile.id)
     if provider != "workday":  # Workday results are a search, not the full board
-        jobs_db.deactivate_missing(provider, token, {p["url"] for p in postings})
-    jobs_db.mark_board_fetched(provider, token)
+        store().deactivate_missing(provider, token, {p["url"] for p in postings})
+    store().mark_board_fetched(provider, token)
     return len(postings)
 
 
@@ -252,9 +255,9 @@ def collect_jobs(profile: IndustryProfile, functions: list[str], progress: Progr
     stats = {"boards_found": 0, "boards_fetched": 0, "postings": 0, "web_postings": 0, "closed": 0}
     stats["closed"] = recheck_postings(profile, progress)
 
-    ranked = [r["company"] for r in rank_companies(profile) if r["score"] > 0][:TOP_MOMENTUM_COMPANIES]
+    ranked = [r["company"] for r in store().rank_companies(profile) if r["score"] > 0][:TOP_MOMENTUM_COMPANIES]
     companies = list(dict.fromkeys(profile.watchlist + ranked))
-    unchecked = [c for c in companies if not jobs_db.was_board_checked(normalize_name(c))]
+    unchecked = [c for c in companies if not store().was_board_checked(normalize_name(c))]
     if unchecked:
         progress(f"Looking for job boards at {len(unchecked)} companies…")
         for company, found in _parallel(discover_boards, unchecked):
@@ -265,7 +268,7 @@ def collect_jobs(profile: IndustryProfile, functions: list[str], progress: Progr
     stats["web_postings"] = search_web(profile, functions, set(companies), progress)
 
     to_fetch = [b for b in _industry_boards(companies)
-                if force or not jobs_db.board_is_fresh(b, BOARD_REFRESH_HOURS)]
+                if force or not store().board_is_fresh(b, BOARD_REFRESH_HOURS)]
     if to_fetch:
         progress(f"Reading {len(to_fetch)} job boards…")
     fetch = lambda board: _fetch_board_into_db(board, profile, functions)
@@ -286,7 +289,7 @@ def _parallel(fn, items, workers: int = 8):
     if not items:
         return
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fn, item): item for item in items}
+        futures = {pool.submit(contextvars.copy_context().run, fn, item): item for item in items}
         for future in as_completed(futures):
             item = futures[future]
             try:

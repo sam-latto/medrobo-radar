@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import date
-from pipeline.llm import call_tool
+from pipeline.llm import call_tools
 from pipeline.models import ExtractedEvent
 from pipeline.text_utils import strip_index_refs
 from profiles.loader import IndustryProfile
@@ -161,7 +161,9 @@ Submit both via the submit_briefing tool.
 Write for a {profile.briefing_audience} audience: specific, analytical and plain-spoken, with company names, amounts and dates. Every claim must come from the events below or the background events; do not add outside facts. If this run is thin, write a shorter brief rather than padding it. The index numbers are only for additional_notable_indices: never mention them in briefing_text.{_context_events_text(context_events or [])}{_previous_briefings_text(previous_briefings or [])}"""
 
     try:
-        parsed = call_tool(prompt, BRIEFING_TOOL, max_tokens=8000)
+        (parsed,) = call_tools([{"prompt": prompt, "tool": BRIEFING_TOOL, "max_tokens": 8000}])
+        if isinstance(parsed, Exception):
+            raise parsed
         briefing_text = strip_index_refs(parsed["briefing_text"])
         additional = [
             i for i in parsed.get("additional_notable_indices", [])

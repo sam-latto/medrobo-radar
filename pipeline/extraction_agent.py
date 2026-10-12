@@ -1,6 +1,7 @@
 import logging
 from config import EXTRACTION_BATCH_SIZE
-from pipeline.llm import call_tool
+from config import EXTRACTION_MODEL
+from pipeline.llm import call_tools
 from pipeline.models import RawResult, ExtractedEvent
 from profiles.loader import IndustryProfile
 
@@ -106,8 +107,8 @@ def _event_from_prefilled(result: RawResult) -> dict:
     return _merge_prefilled({"summary": result.title, "segment": "other", "event_type": "news"}, result)
 
 
-def _extract_batch(batch: list[RawResult], profile: IndustryProfile) -> list[ExtractedEvent]:
-    """One Claude call for a batch of results. Raises on API/tool failure."""
+def _extract_request(batch: list[RawResult], profile: IndustryProfile) -> dict:
+    """The Claude call for one group of results."""
     results_text = "\n\n---\n\n".join(_format_result(i, r) for i, r in enumerate(batch))
     prompt = f"""You are analyzing {len(batch)} search results for an intelligence platform tracking the {profile.name} industry ({profile.description}).
 
@@ -117,8 +118,11 @@ Extract one structured event per result. Where a result lists authoritative fact
 
 Call the record_events tool with one entry per result, using its [id] as result_id."""
 
-    data = call_tool(prompt, build_extract_tool(profile), max_tokens=8192)
+    return {"prompt": prompt, "tool": build_extract_tool(profile), "max_tokens": 8192, "model": EXTRACTION_MODEL}
 
+
+def _parse_events(data: dict, batch: list[RawResult], profile: IndustryProfile) -> list[ExtractedEvent]:
+    """Events from the tool input returned for one group of results."""
     items: list[tuple[RawResult, dict]] = []
     seen_ids: set[int] = set()
     dropped = 0
@@ -154,26 +158,30 @@ Call the record_events tool with one entry per result, using its [id] as result_
 
 
 def run_extraction_agent(raw_results: list[RawResult], profile: IndustryProfile) -> list[ExtractedEvent]:
+    """Extract events in groups of EXTRACTION_BATCH_SIZE. All groups go out together (as one
+    Message Batch when the worker turns batch mode on); a group that fails is retried one
+    result at a time, so one bad result can't lose the others."""
+    groups = [raw_results[i:i + EXTRACTION_BATCH_SIZE] for i in range(0, len(raw_results), EXTRACTION_BATCH_SIZE)]
     extracted: list[ExtractedEvent] = []
-    api_calls = 0
-
-    for start in range(0, len(raw_results), EXTRACTION_BATCH_SIZE):
-        batch = raw_results[start : start + EXTRACTION_BATCH_SIZE]
+    retry: list[RawResult] = []
+    for group, data in zip(groups, call_tools([_extract_request(g, profile) for g in groups])):
         try:
-            api_calls += 1
-            extracted.extend(_extract_batch(batch, profile))
+            if isinstance(data, Exception):
+                raise data
+            extracted.extend(_parse_events(data, group, profile))
         except Exception as e:
-            # Isolate failures: retry each item of the failed batch on its own
-            logger.error(f"Extraction batch starting at {start} failed ({e}); retrying items individually")
-            for result in batch:
-                try:
-                    api_calls += 1
-                    extracted.extend(_extract_batch([result], profile))
-                except Exception as item_error:
-                    logger.error(f"Extraction failed for {result.url}: {item_error}")
+            logger.error(f"Extraction of a group of {len(group)} failed ({e}); retrying its results individually")
+            retry.extend(group)
+    for result, data in zip(retry, call_tools([_extract_request([r], profile) for r in retry])):
+        try:
+            if isinstance(data, Exception):
+                raise data
+            extracted.extend(_parse_events(data, [result], profile))
+        except Exception as e:
+            logger.error(f"Extraction failed for {result.url}: {e}")
 
     logger.info(
         f"[{profile.id}] Extraction agent produced {len(extracted)} structured records "
-        f"from {len(raw_results)} results in {api_calls} API calls"
+        f"from {len(raw_results)} results in {len(groups) + len(retry)} API calls"
     )
     return extracted

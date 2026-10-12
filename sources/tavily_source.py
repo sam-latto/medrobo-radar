@@ -4,6 +4,7 @@ from datetime import date
 from tavily import TavilyClient
 
 from config import TAVILY_API_KEY, SEARCH_TIME_RANGE
+from pipeline.llm import record_search
 from pipeline.models import RawResult
 from profiles.loader import IndustryProfile
 from sources.trusted_domains import search_domains
@@ -50,9 +51,10 @@ class TavilySource:
         for query, query_tag in build_queries(profile):
             logger.info(f"Searching: {query}")
             try:
+                depth = settings.get("search_depth", "advanced")
                 response = client.search(
                     query=query,
-                    search_depth=settings.get("search_depth", "advanced"),
+                    search_depth=depth,
                     max_results=settings.get("max_results", 5),
                     include_raw_content=False,
                     time_range=settings.get("time_range", SEARCH_TIME_RANGE),
@@ -61,6 +63,7 @@ class TavilySource:
             except Exception as e:
                 logger.error(f"Search failed for query '{query}': {e}")
                 continue
+            record_search("industry_search", depth)
             for item in response.get("results", []):
                 url = item.get("url", "")
                 if not url:

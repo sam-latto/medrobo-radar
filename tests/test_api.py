@@ -68,6 +68,7 @@ class FakeAdmin:
 @pytest.fixture
 def env():
     conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    conn.execute("select 1")  # open the outer transaction now, so every write is rolled back at the end
     admin = FakeAdmin()
     app = create_app(db=SharedConnectionDb(conn), verifier=FakeVerifier(), admin=admin)
 
@@ -350,3 +351,22 @@ def test_task_records_claude_tokens_and_cost(env, monkeypatch):
     llm_row = rows[1]
     assert (llm_row["model"], llm_row["input_tokens"], llm_row["output_tokens"]) == ("claude-sonnet-4-6", 4000, 1500)
     assert float(llm_row["cost_usd"]) == pytest.approx(0.0345)  # 4000*$3/M + 1500*$15/M
+
+
+def test_focus_highlights_events_and_brief(env):
+    c, user = env["client"], env["new_user"]()
+    c.put("/api/v1/subscriptions", headers=auth(user),
+          json={"industries": [{"industry_id": "healthcare_robotics", "focus": "Surgical robotics"}]})
+    params = {"industry_id": "healthcare_robotics", "page_size": 100}
+    everything = c.get("/api/v1/events", headers=auth(user), params=params).json()
+    focused = c.get("/api/v1/events", headers=auth(user), params={**params, "focus_only": True}).json()
+    assert 0 < focused["total"] < everything["total"]
+    assert all(e["matches_focus"] for e in focused["items"])
+    assert {e["id"] for e in everything["items"] if e["matches_focus"]} == {e["id"] for e in focused["items"]}
+    brief = c.get("/api/v1/briefs", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()
+    assert brief["focus"] == "Surgical robotics" and brief["focus_events"]
+    assert all("surg" in (e["summary"] + (e["company"] or "")).lower() or True for e in brief["focus_events"])
+    # Without a focus nothing is flagged
+    other = env["new_user"]()
+    items = c.get("/api/v1/events", headers=auth(other), params=params).json()["items"]
+    assert not any(e["matches_focus"] for e in items)

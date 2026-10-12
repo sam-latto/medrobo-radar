@@ -24,6 +24,7 @@ PRIVATE_TABLES = ["subscriptions", "watchlist", "resumes", "job_preferences", "u
 @pytest.fixture
 def db():
     conn = psycopg.connect(DATABASE_URL)
+    conn.execute("select 1")  # open the outer transaction now, so every write is rolled back at the end
     try:
         yield conn
     finally:
