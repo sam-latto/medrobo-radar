@@ -302,7 +302,7 @@ Each phase leaves something working and is committed separately.
 
 | Phase | What | Done when |
 |---|---|---|
-| A | Architecture notes and migration plan | Tables, RLS rules and API endpoints written down |
+| A | Architecture notes, migration plan, design system | `docs/ARCHITECTURE.md` and `docs/DESIGN.md` written and approved |
 | B | Supabase project, migrations, data copied from SQLite | Existing events, companies and briefs readable in Postgres |
 | C | FastAPI over the existing code | Briefs, events, companies and Jobs work via the API, with tests |
 | D | Worker | Daily run writes events and briefs for followed industries |
@@ -320,14 +320,22 @@ Each phase leaves something working and is committed separately.
 | Brief and event pages load | < 2 seconds |
 | Users who can read another user's private data | 0 (tested with RLS tests) |
 | Uptime | Site reachable without my laptop on |
-| Monthly cost at launch | Within the budget set before launch |
+| Monthly cost at launch | ≤ $300 |
 | Cost visibility | Every Claude and search call recorded with its cost |
 
 ---
 
-## 10. Open decisions
+## 10. Launch decisions (October 2026)
 
-- Resume-tailoring cap (suggested 5/day or ~30/month).
-- Starting monthly budget and target launch date. Current estimate for a Ross launch: roughly $300–750/month, mostly Claude usage for Jobs.
-- Where the chat agent lives in the new app (it was removed as its own page).
-- Whether sign-in is limited to university Google accounts.
+| Decision | Choice | Why |
+|---|---|---|
+| Resume tailoring cap | 30 per user per month | Allows bursts during recruiting season while keeping the monthly cost predictable |
+| Who can sign in | `@umich.edu` Google accounts only | Keeps the launch to the Ross community and contains cost; the communities table makes opening up later a data change |
+| Existing data | Moved over as the starting data | New users see months of history on day one instead of an empty app |
+| New industries | Consulting, Private equity, Venture capital (Banking later) | The sectors Ross students recruit into most; Banking waits until there's demand |
+| Daily email | Opt-in, off by default | Avoids spamming classmates and keeps email cost at zero until people ask for it |
+| Chat agent | Left out of the first release | Focus the launch on the brief, events, companies and Jobs; add chat once the core is solid |
+| Budget | ~$300/month | Covers hosting plus Claude and search within the usage limits |
+| Launch date | December 1, 2026 | |
+
+Details of how these are enforced are in `docs/ARCHITECTURE.md`. The look and component rules are in `docs/DESIGN.md`.
