@@ -208,7 +208,7 @@ Per company, over a rolling 90-day window (weights live in the profile, sensible
 
 ## 8. Out of scope (v2)
 
-- Multi-user auth, hosting, or a Next.js rewrite
+- Multi-user auth, hosting, or a Next.js rewrite (now planned in `docs/PRD_v3.md`)
 - Paid data sources (PitchBook, Crunchbase, Bloomberg)
 - Scraping LinkedIn or any site whose terms forbid it
 
