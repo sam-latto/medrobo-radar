@@ -281,10 +281,10 @@ All endpoints are under `/api/v1`, require a valid JWT except `/health`, and ret
 | GET / POST / DELETE | `/resumes`, `/resumes/{id}` | List, upload (PDF/DOCX, text extracted), delete |
 | PATCH | `/resumes/{id}` | Set the role types this resume covers |
 | GET / PUT | `/job-preferences` | Role types, locations, seniority, industries |
-| POST | `/jobs/search` | **Metered (1/day).** Starts find & score; returns a task id |
-| GET | `/jobs/search/{task_id}` | Progress and status of that search |
+| POST | `/jobs/search` | **Metered (1/day).** Scores the active postings in the user's industries (collected daily by the worker) against their resumes; returns a task id |
+| GET | `/tasks/{task_id}` | Progress, result or error of a search or tailoring task |
 | GET | `/jobs/matches?…` | Scored matches with filters |
-| POST | `/jobs/{job_id}/tailor` | **Metered (30/month).** Starts tailoring; returns a task id |
+| POST | `/jobs/{job_id}/tailor` | **Metered (30/month).** Starts tailoring; returns a task id. Already-tailored jobs return the saved advice and aren't charged |
 | GET | `/jobs/{job_id}/tailor` | Saved tailoring advice, or progress if running |
 
 **Long tasks:** find & score and tailoring take 30–60+ seconds, so they run as background tasks. The API returns a task id right away, and the front end polls every few seconds. At launch scale, a simple `tasks` table plus FastAPI background workers is enough; a queue (e.g. Redis) can come later.
@@ -300,7 +300,9 @@ tasks (id uuid pk, user_id uuid, kind text, status text, progress jsonb,
 
 **Before a metered action:** the API counts the user's `usage_events` for that action in the current period (UTC day for `find_jobs`, calendar month for `tailor_resume`) and compares with the plan's limit. If the user is at the limit it returns `429` with `limit_reached` and when it resets. Only successful runs count, and the check and insert happen in one transaction so double clicks can't go over.
 
-**On every Claude and search call:** `pipeline/llm.py` (`call_tool`) and the Tavily source record model, tokens and cost into `usage_events`, tagged with the user (API) or the industry (worker). This finishes the pending "token-usage logging on every Claude call" item.
+**On every Claude call:** `pipeline/llm.py` (`call_tool`) reports model, tokens and cost (prices in `pipeline/pricing.py`) to a per-task collector, which writes `usage_events` rows with action `llm:<tool name>`, tagged with the user (API) or the industry (worker, Phase D). Search (Tavily) cost logging follows in Phase D.
+
+**Why job search doesn't search the web live:** collecting postings from job boards is slow (minutes) and the same for every user in an industry, so the worker refreshes postings once a day (Phase D) and a user's search only filters and scores them. Faster for the user and cheaper per search.
 
 **Spend controls (budget ~$300/month):**
 - Hard monthly spend limits set in the Anthropic and Tavily consoles.
@@ -351,6 +353,10 @@ The local SQLite app keeps working until the new app is live, so nothing is lost
 - **Secrets:** stored in Render and Vercel environment settings, never in git. `.env.example` lists the names.
 - **Errors:** Sentry in the API, worker and front end (free tier).
 - **Accounts:** Supabase, Vercel, Render, Sentry and the Google OAuth client are all under sam.rubin.latto@gmail.com, never the work account.
+
+---
+
+**Running the API locally:** `uvicorn api.main:app --reload`, then open http://localhost:8000/api/v1/docs. End-to-end tests: `RUN_DB_TESTS=1 python -m pytest tests/test_api.py tests/test_supabase_rls.py` (run against dev in a rolled-back transaction, with Claude and Supabase Storage faked).
 
 ---
 

@@ -1,7 +1,7 @@
 """Job functions (e.g. Product Management) and the title keywords that identify them."""
 import re
 
-from database.jobs_db import get_setting, set_setting
+from database import jobs_db
 from pipeline.llm import call_tool
 
 FUNCTION_KEYWORDS: dict[str, list[str]] = {
@@ -49,12 +49,20 @@ _KEYWORD_TOOL = {
 }
 
 
+# Where expanded keyword lists are cached; the web API points this at Postgres.
+_cache = {"get": lambda key: jobs_db.get_setting(key), "set": lambda key, value: jobs_db.set_setting(key, value)}
+
+
+def set_keyword_cache(get, set_) -> None:
+    _cache["get"], _cache["set"] = get, set_
+
+
 def keywords_for(function: str) -> list[str]:
     """Title keywords for a function; custom functions are expanded once by Claude and cached."""
     if function in FUNCTION_KEYWORDS:
         return FUNCTION_KEYWORDS[function]
     cache_key = f"function_keywords:{function.strip().lower()}"
-    cached = get_setting(cache_key)
+    cached = _cache["get"](cache_key)
     if cached:
         return cached
     base = [function.strip().lower()]
@@ -67,7 +75,7 @@ def keywords_for(function: str) -> list[str]:
         keywords = sorted({k.strip().lower() for k in data.get("keywords", []) if k.strip()} | set(base))
     except Exception:
         return base  # don't cache a fallback
-    set_setting(cache_key, keywords)
+    _cache["set"](cache_key, keywords)
     return keywords
 
 

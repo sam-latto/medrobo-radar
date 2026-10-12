@@ -68,8 +68,6 @@ def rank_companies(profile: IndustryProfile, as_of: date | None = None,
     industry (watchlist companies too, even with no recent events)."""
     as_of = as_of or date.today()
     since = (as_of - timedelta(days=window_days)).isoformat()
-    weights = weights_for(profile)
-
     with get_connection() as conn:
         rows = conn.execute(
             """SELECT id, company_id, event_type, funding_amount, product, regulatory_status, date
@@ -77,14 +75,22 @@ def rank_companies(profile: IndustryProfile, as_of: date | None = None,
                WHERE industry_id = ? AND company_id IS NOT NULL AND date >= ? AND date <= ?""",
             (profile.id, since, as_of.isoformat()),
         ).fetchall()
+    return rank(profile, company_db.list_companies(profile.id), [dict(r) for r in rows])
+
+
+def rank(profile: IndustryProfile, companies: list[dict], events: list[dict]) -> list[dict]:
+    """Rank `companies` (dicts with id, name, normalized_name) by the momentum of `events`
+    (dicts with company_id, event_type, funding_amount, product, regulatory_status, date),
+    which should already be limited to the industry and the time window."""
+    weights = weights_for(profile)
     by_company: dict[int, list[dict]] = {}
-    for r in rows:
-        by_company.setdefault(r["company_id"], []).append(dict(r))
+    for e in events:
+        by_company.setdefault(e["company_id"], []).append(e)
 
     watch_norm = {normalize_name(n) for n in profile.watchlist}
 
     ranking = []
-    for c in company_db.list_companies(profile.id):
+    for c in companies:
         events = by_company.get(c["id"], [])
         funding_seen: set[int] = set()
         disclosed = 0
@@ -101,7 +107,7 @@ def rank_companies(profile: IndustryProfile, as_of: date | None = None,
             "events_90d": len(events),
             "funding_90d": disclosed,
             "regulatory_90d": sum(1 for e in events if e["event_type"] == "regulatory"),
-            "last_event": max((e["date"] for e in events if e.get("date")), default=None),
+            "last_event": max((str(e["date"]) for e in events if e.get("date")), default=None),
         })
     ranking.sort(key=lambda r: (-r["score"], not r["watchlist"], r["company"].lower()))
     for i, r in enumerate(ranking, 1):

@@ -1,4 +1,5 @@
 """Match postings to a resume and suggest resume changes, using Claude."""
+import contextvars
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -57,12 +58,18 @@ def location_ok(job: dict, locations: list[str], include_remote: bool, remote_on
 
 
 def candidate_jobs(industry_ids: list[str], functions: list[str], locations: list[str],
-                   include_remote: bool = True, remote_only: bool = False) -> list[dict]:
-    """Active postings in the industries whose title matches a target function and location."""
+                   include_remote: bool = True, remote_only: bool = False,
+                   postings: list[dict] | None = None) -> list[dict]:
+    """Active postings in the industries whose title matches a target function and location.
+
+    `postings` defaults to the local database's active postings for `industry_ids`.
+    """
     out = []
     seen: set[tuple] = set()
+    if postings is None:
+        postings = jobs_db.list_active_postings(industry_ids)
     # Board postings first, so they win over web-search copies of the same job
-    postings = sorted(jobs_db.list_active_postings(industry_ids), key=lambda j: j["provider"] == "web")
+    postings = sorted(postings, key=lambda j: j["provider"] == "web")
     for job in postings:
         fns = matching_functions(job["title"], functions)
         if not fns or not location_ok(job, locations, include_remote, remote_only):
@@ -144,13 +151,14 @@ def _score_batch(batch: list[dict], system: list[dict], target_industries: list[
 
 
 def score_jobs(resume: dict, jobs: list[dict], target_industries: list[str],
-               progress: Callable[[str], None] | None = None) -> int:
+               progress: Callable[[str], None] | None = None, store=jobs_db) -> int:
     """Score jobs not yet scored for this resume (up to MAX_SCORED_PER_SEARCH). Returns number scored.
 
     Postings with full descriptions from job boards are scored before web-search snippets.
+    `store` provides get_matches / save_match / update_posting_company (default: local database).
     """
     progress = progress or (lambda msg: None)
-    done = jobs_db.get_matches(resume["id"])
+    done = store.get_matches(resume["id"])
     todo = sorted((j for j in jobs if j["id"] not in done),
                   key=lambda j: j["provider"] == "web")[:MAX_SCORED_PER_SEARCH]
     if not todo:
@@ -160,7 +168,8 @@ def score_jobs(resume: dict, jobs: list[dict], target_industries: list[str],
     progress(f"Scoring {len(todo)} jobs against your resume…")
     scored = 0
     with ThreadPoolExecutor(max_workers=SCORING_WORKERS) as pool:
-        futures = {pool.submit(_score_batch, b, system, target_industries): b for b in batches}
+        futures = {pool.submit(contextvars.copy_context().run, _score_batch, b, system, target_industries): b
+                   for b in batches}
         for future in as_completed(futures):
             by_id = {j["id"]: j for j in futures[future]}
             try:
@@ -173,12 +182,12 @@ def score_jobs(resume: dict, jobs: list[dict], target_industries: list[str],
                 if not job:
                     continue
                 score = max(0, min(100, int(s.get("score", 0))))
-                jobs_db.save_match(job["id"], resume["id"], score, s.get("summary", ""),
+                store.save_match(job["id"], resume["id"], score, s.get("summary", ""),
                                    s.get("strengths", [])[:3], s.get("gaps", [])[:3], s.get("level_fit"),
                                    s.get("industry_match"))
                 company = (s.get("company") or "").strip()
                 if company.lower() not in _PLACEHOLDER_COMPANIES and not job.get("company"):
-                    jobs_db.update_posting_company(job["id"], company)
+                    store.update_posting_company(job["id"], company)
                 scored += 1
             progress(f"Scored {scored}/{len(todo)} jobs")
     return scored
@@ -305,8 +314,9 @@ def _normalize_ws(text: str) -> str:
     return re.sub(r"[\s•\-–—*]+", " ", text or "").strip().lower()
 
 
-def tailor_resume(resume: dict, job: dict) -> dict:
-    cached = jobs_db.get_advice(resume["id"], "job", str(job["id"]))
+def tailor_resume(resume: dict, job: dict, store=jobs_db) -> dict:
+    """Resume changes for one job; cached per resume and job in `store` (default: local database)."""
+    cached = store.get_advice(resume["id"], "job", str(job["id"]))
     if cached:
         return cached
     prompt = (
@@ -320,5 +330,5 @@ def tailor_resume(resume: dict, job: dict) -> dict:
     for rewrite in data.get("bullet_rewrites", []):
         # Flag rewrites whose "original" isn't actually in the resume
         rewrite["verified"] = _normalize_ws(rewrite.get("original", ""))[:80] in resume_norm
-    jobs_db.save_advice(resume["id"], "job", str(job["id"]), data)
+    store.save_advice(resume["id"], "job", str(job["id"]), data)
     return data
