@@ -84,7 +84,7 @@ industries (
   id text pk,                    -- 'healthcare_robotics', 'consulting'
   parent_id text fk -> industries null,  -- sector, e.g. 'healthcare'
   name text,
-  kind text,                     -- 'sector' | 'sub_industry'
+  kind text,                     -- 'sector' (a group) | 'industry' (followable, can run a pipeline)
   profile_yaml text null,        -- pipeline config (today's profiles/*.yaml)
   status text,                   -- 'active' | 'needs_review' | 'retired'
   sort_order int
@@ -99,7 +99,8 @@ custom_industry_requests (
 )
 ```
 
-- Sectors with no sub-industries (e.g. Consulting, Private equity, Venture capital) are a single `sub_industry` row so they can be followed and run.
+- A sector with sub-industries (Technology, Healthcare, Financial services…) is `kind = 'sector'`; following it means following all its sub-industries. Areas with no sub-industries (Consulting, Real estate…) are a single `kind = 'industry'` row with no parent.
+- Private equity and Venture capital sit under Financial services (Banking to be added later).
 - The pipeline only runs industries with `profile_yaml` set, `status = 'active'`, and at least one follower.
 - The three existing YAML profiles seed `profile_yaml` for healthcare_robotics, physical_ai and industrial_automation. Other catalog entries get a profile drafted by `profile_agent.py` and reviewed by Sam before they turn active.
 
@@ -325,7 +326,7 @@ Custom focuses (e.g. "Surgical robotics" inside Healthcare robotics) don't creat
 
 A one-time script, `scripts/migrate_sqlite_to_postgres.py`, run against the dev database first and then prod:
 
-1. **Back up** `medrobo.db` (copy with a timestamp, like the earlier migrations).
+1. **Open `medrobo.db` read-only**, so the local file can't be changed by the copy.
 2. **Catalog:** insert sectors and sub-industries, including Consulting, Private equity and Venture capital. Load the three YAML profiles into `profile_yaml`.
 3. **Shared data:** copy `pipeline_runs`, `events`, `companies` (+ `company_industries`), `job_boards`, `job_board_checks`, `job_postings` (+ `job_posting_industries`). Move each run's `briefing_text` into `briefs`. Map SQLite integer run ids to new uuids.
 4. **Sam's personal data:** after Sam signs in once (so the account exists), copy `resumes`, `job_matches`, `resume_advice` and the job preferences from `app_settings` with `user_id` = Sam's id. Upload resume files to Storage if the originals are available; otherwise keep the extracted text.
@@ -345,7 +346,8 @@ The local SQLite app keeps working until the new app is live, so nothing is lost
 | Front end | `next dev` locally, Vercel preview per branch | Vercel production (main branch) |
 | Data | Copy of the migrated data | Real data |
 
-- **Migrations:** SQL files in `supabase/migrations/`, applied with the Supabase CLI. Every schema change is a new file, committed to git, applied to dev first.
+- **Migrations:** SQL files in `supabase/migrations/`, applied with `python scripts/db_migrate.py` (records them in the same table the Supabase CLI uses, so the CLI can take over later). `supabase/seed.sql` holds plans, communities and the industry catalog. Every schema change is a new file, committed to git, applied to dev first.
+- **Database tests:** `RUN_DB_TESTS=1 python -m pytest tests/test_supabase_rls.py` checks the sign-in rule and row-level security against dev, inside a transaction that's rolled back.
 - **Secrets:** stored in Render and Vercel environment settings, never in git. `.env.example` lists the names.
 - **Errors:** Sentry in the API, worker and front end (free tier).
 - **Accounts:** Supabase, Vercel, Render, Sentry and the Google OAuth client are all under sam.rubin.latto@gmail.com, never the work account.

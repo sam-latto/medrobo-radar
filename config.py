@@ -12,6 +12,12 @@ EMAIL_TO = os.getenv("EMAIL_TO", "")
 
 DB_PATH = os.getenv("DB_PATH", "medrobo.db")
 
+# Supabase (web app). DATABASE_URL is the session-pooler connection string.
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+
 PIPELINE_SCHEDULE_HOUR = int(os.getenv("PIPELINE_SCHEDULE_HOUR", "7"))
 PIPELINE_SCHEDULE_MINUTE = int(os.getenv("PIPELINE_SCHEDULE_MINUTE", "0"))
 # A failed scheduled run is retried once after this delay, then an alert email is sent
