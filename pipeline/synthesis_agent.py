@@ -5,6 +5,7 @@ from pipeline.llm import call_tools
 from pipeline.models import ExtractedEvent
 from pipeline.text_utils import drop_unknown_links, strip_index_refs
 from profiles.loader import IndustryProfile
+from sources.trusted_domains import is_redirect
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +228,8 @@ Write for these readers: {profile.briefing_audience}. Be specific, analytical an
         (parsed,) = call_tools([{"prompt": prompt, "tool": BRIEFING_TOOL, "max_tokens": 16000}])
         if isinstance(parsed, Exception):
             raise parsed
-        allowed_urls = [e.source_url for e in events] + [c.get("source_url") for c in context_events or []]
+        allowed_urls = [u for u in [e.source_url for e in events] + [c.get("source_url") for c in context_events or []]
+                        if u and not is_redirect(u)]
         briefing_text, dropped = drop_unknown_links(strip_index_refs(parsed["briefing_text"]), allowed_urls)
         missing = uncovered(key, briefing_text)
         if missing:
