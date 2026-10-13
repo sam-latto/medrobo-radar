@@ -4,7 +4,7 @@
 **Last Updated:** October 2026
 **Source:** the approved redesign mockups (private canvas https://claude.ai/artifact/Rv3Q8Vp3AM39PsSXRmH1uV). When this doc and a mockup disagree, this doc wins; update the mockup.
 
-Every value here is also defined once in the front end's theme (`web/tailwind.config.ts` and `web/app/globals.css`). Components use the named tokens, never raw hex codes or one-off sizes. If a design needs something that isn't here, add it here first.
+Every value here is also defined once in the front end's theme (the `@theme` block in `web/app/globals.css`; Tailwind v4 has no `tailwind.config.ts`), which turns each token into a class such as `bg-teal`, `text-h1` or `rounded-lg`. Components use the named tokens, never raw hex codes or one-off sizes. If a design needs something that isn't here, add it here first.
 
 ---
 
