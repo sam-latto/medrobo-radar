@@ -87,6 +87,21 @@ def _context_events_text(context_events: list[dict]) -> str:
     )
 
 
+# What leads the brief, most important first; a profile's briefing_priorities replaces this
+DEFAULT_BRIEFING_PRIORITIES = [
+    "Large funding rounds, acquisitions and mergers, and regulatory approvals",
+    "Commercial traction: major customers, deployments at scale, big-company partnerships, hiring and expansion",
+    "Product launches and notable new entrants",
+    "Leadership changes and strategy shifts at major companies",
+    "Research and clinical trials, only when the result is a clear breakthrough or decisive",
+]
+
+
+def _priorities_text(profile: IndustryProfile) -> str:
+    priorities = profile.briefing_priorities or DEFAULT_BRIEFING_PRIORITIES
+    return "\n".join(f"   {i}. {p}" for i, p in enumerate(priorities, 1))
+
+
 KEY_DEALS = 5
 KEY_REGULATORY = 5
 DEAL_TYPES = {"funding", "partnership_ma"}
@@ -178,7 +193,11 @@ Today is {today}. Below are {len(events)} structured events discovered in the la
 
 {events_json}{_key_items_text(key)}
 
-Your task: write the research brief, a 1-2 page market note in the style of an equity research morning note or a business newspaper's industry brief, not a list of news items. Pick the few most important stories from this run, explain what they mean for the industry, and connect them to the earlier events in the background section. Aim for 900-1,300 words.
+Your task: write the research brief, a 1-2 page industry note in the style of a business newspaper's industry coverage or a consulting firm's industry update, not a list of news items. Pick the few most important stories from this run, explain what they mean for the industry, and connect them to the earlier events in the background section. Aim for 900-1,300 words.
+
+   How to decide what matters most: rank this run's news by the order below, lead with the most important story from the highest category that has real news, and order the analysis sections the same way.
+{_priorities_text(profile)}
+   Within a category, bigger and more concrete beats smaller and vaguer (a $150M round beats a $10M one; a signed deployment beats a pilot announcement), and a story backed by a filing or research record beats one with only a news report. A neat theme is not a reason to rank a smaller story above a larger one.
 
    Use exactly this Markdown structure:
 
@@ -202,7 +221,7 @@ Source trust: events with source_type openfda or sec_form_d come from official f
 
 Submit it via the submit_briefing tool.
 
-Write for a {profile.briefing_audience} audience: specific, analytical and plain-spoken, with company names, amounts and dates. Every claim must come from the events below or the background events; do not add outside facts. Many events have no date (null): never guess one, and never use today's date for them; write "this week" or leave the date out. State a date only when the event gives it. If this run is thin, write a shorter brief rather than padding it. Never mention the events' index numbers in the brief.{_context_events_text(context_events or [])}{_previous_briefings_text(previous_briefings or [])}"""
+Write for these readers: {profile.briefing_audience}. Be specific, analytical and plain-spoken, with company names, amounts and dates, and briefly explain terms a smart generalist wouldn't know (e.g. De Novo, VLA, Series B extension). Every claim must come from the events below or the background events; do not add outside facts. Many events have no date (null): never guess one, and never use today's date for them; write "this week" or leave the date out. State a date only when the event gives it. If this run is thin, write a shorter brief rather than padding it. Never mention the events' index numbers in the brief.{_context_events_text(context_events or [])}{_previous_briefings_text(previous_briefings or [])}"""
 
     try:
         (parsed,) = call_tools([{"prompt": prompt, "tool": BRIEFING_TOOL, "max_tokens": 16000}])

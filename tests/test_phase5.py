@@ -118,4 +118,32 @@ def test_synthesis_prompt_says_weekly_when_the_last_brief_is_old(monkeypatch):
     assert "the 7 days since the previous brief" in prompts[0] and "weekly brief" in prompts[0]
     assert "roughly the last day" in prompts[1] and "This is a daily brief." in prompts[1]
     assert "the first for this industry" in prompts[2]
-    assert all("additional_notable_indices" not in p and "notable" not in p.lower() for p in prompts)
+    assert all("notable_indices" not in p and "notable events" not in p.lower() for p in prompts)
+
+
+def test_brief_is_written_for_mba_readers_with_a_fixed_ranking(monkeypatch):
+    from profiles.loader import DEFAULT_AUDIENCE, load_profile
+    prompts = []
+    monkeypatch.setattr("pipeline.llm.call_tool",
+                        lambda prompt, tool, **k: prompts.append(prompt) or {"briefing_text": "b"})
+    events = [ExtractedEvent(event_type="news", summary="s", source_url="u")]
+    for industry in ("healthcare_robotics", "industrial_automation", "physical_ai"):
+        profile = load_profile(industry)
+        assert profile.briefing_audience == DEFAULT_AUDIENCE  # no profile keeps an investor persona
+        synthesis_agent.run_synthesis_agent(events, profile)
+    prompt = prompts[0]
+    assert "MBA students and early-career professionals" in prompt
+    assert "investor" not in prompt.lower() and "equity research" not in prompt.lower()
+    first, second = synthesis_agent.DEFAULT_BRIEFING_PRIORITIES[:2]
+    assert f"1. {first}" in prompt and f"2. {second}" in prompt
+    assert "A neat theme is not a reason to rank a smaller story above a larger one" in prompt
+
+
+def test_profile_can_set_its_own_priorities(monkeypatch):
+    prompts = []
+    monkeypatch.setattr("pipeline.llm.call_tool",
+                        lambda prompt, tool, **k: prompts.append(prompt) or {"briefing_text": "b"})
+    profile = PROFILE.model_copy(update={"briefing_priorities": ["Large client wins", "Partner moves"]})
+    synthesis_agent.run_synthesis_agent([ExtractedEvent(event_type="news", summary="s", source_url="u")], profile)
+    assert "1. Large client wins" in prompts[0] and "2. Partner moves" in prompts[0]
+    assert synthesis_agent.DEFAULT_BRIEFING_PRIORITIES[0] not in prompts[0]

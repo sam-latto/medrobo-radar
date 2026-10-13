@@ -75,14 +75,18 @@ def build_profile_tool() -> dict:
                     "items": {"type": "string"},
                     "description": "5-15 of the most important companies to watch in this industry",
                 },
-                "briefing_audience": {
-                    "type": "string",
-                    "description": "Who the daily briefing is written for, e.g. 'climate-tech investor'",
+                "briefing_priorities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": ("Only if this industry's news differs from the default order (big deals and "
+                                    "approvals, commercial traction, launches, leadership and strategy, research): "
+                                    "4-6 kinds of news, most important first, e.g. for consulting 'Large client "
+                                    "wins and practice launches'"),
                 },
             },
             "required": [
                 "name", "description", "segments", "event_types", "search_queries",
-                "notable_rules", "sources", "watchlist", "briefing_audience",
+                "notable_rules", "sources", "watchlist",
             ],
         },
     }
@@ -101,7 +105,7 @@ def _unique_id(base: str) -> str:
 
 def draft_profile(industry_name: str) -> IndustryProfile:
     """Ask Claude to draft a full profile for `industry_name`. Not saved; inactive."""
-    prompt = f"""You are configuring an autonomous market-intelligence agent to track the "{industry_name}" industry for investors.
+    prompt = f"""You are configuring an autonomous market-intelligence agent to track the "{industry_name}" industry for MBA students following it for their careers.
 
 Design a tracking profile: the industry's main segments, the event types worth tracking, one web search query per event type (with a {{segment}} placeholder that will be replaced by each segment name), notable-event rules, the data sources to use, and a watchlist of the most important companies.
 
