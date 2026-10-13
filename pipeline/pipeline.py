@@ -63,8 +63,10 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
                            date_from=(date.today() - timedelta(days=CONTEXT_DAYS)).isoformat()),
             key=lambda e: e.get("date") or "", reverse=True,
         )
+        last = previous[0]["run_date"] if previous else None  # date (Postgres) or "YYYY-MM-DD" (SQLite)
+        previous_brief_date = date.fromisoformat(str(last)[:10]) if last else None
         briefing_text, notable_indices = run_synthesis_agent(
-            structured_events, profile, previous, context_events)
+            structured_events, profile, previous, context_events, previous_brief_date)
 
         # Link events to company records
         try:

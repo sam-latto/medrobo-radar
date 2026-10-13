@@ -70,7 +70,7 @@ def keywords_for(function: str) -> list[str]:
         data = call_tool(
             f'List job-title keywords that identify roles in the "{function}" function '
             "(e.g. for 'Product Management': product manager, product owner, head of product).",
-            _KEYWORD_TOOL, max_tokens=512,
+            _KEYWORD_TOOL, max_tokens=4096,
         )
         keywords = sorted({k.strip().lower() for k in data.get("keywords", []) if k.strip()} | set(base))
     except Exception:

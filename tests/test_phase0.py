@@ -78,8 +78,8 @@ def test_synthesis_uses_tool_output(monkeypatch):
     ]
     monkeypatch.setattr(
         "pipeline.llm.call_tool",
-        lambda *a, **k: {"briefing_text": "Hello briefing", "additional_notable_indices": [2, 7]},
+        lambda *a, **k: {"briefing_text": "Hello briefing"},
     )
     text, notable = synthesis_agent.run_synthesis_agent(events, PROFILE)
     assert text == "Hello briefing"
-    assert notable == [0, 2]  # rule-notable regulatory + model pick; out-of-range 7 dropped
+    assert notable == [0]  # rule-based only (regulatory); Claude no longer picks notable events

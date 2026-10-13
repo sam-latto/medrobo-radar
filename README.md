@@ -54,7 +54,7 @@ Create one from the dashboard (sidebar → ➕ New industry → review the YAML 
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
 | `TAVILY_API_KEY` | Yes | Tavily search API key |
-| `ANTHROPIC_MODEL` | No | Claude model (default `claude-sonnet-4-6`) |
+| `ANTHROPIC_MODEL` | No | Claude model (default `claude-sonnet-5-5`) |
 | `SEC_USER_AGENT` | For SEC | SEC requires a descriptive User-Agent with a contact email, e.g. `IndustryRadar you@example.com`. The Form D source is skipped without it. |
 | `OPENFDA_API_KEY`, `NCBI_API_KEY` | No | Optional keys that raise openFDA / PubMed rate limits |
 | `SEARCH_TIME_RANGE` | No | Tavily recency filter: `day`, `week` (default), `month`, `year` |

@@ -149,7 +149,7 @@ def _score_batch(batch: list[dict], system: list[dict], target_industries: list[
         "role; don't mention job_id numbers.\n\nScore the candidate's fit for each job:\n\n"
         + "\n\n---\n\n".join(_job_block(j, SCORING_DESCRIPTION_CHARS) for j in batch)
     )
-    return call_tool(prompt, SCORE_TOOL, max_tokens=6000, system=system)
+    return call_tool(prompt, SCORE_TOOL, max_tokens=16000, system=system)
 
 
 def score_jobs(resume: dict, jobs: list[dict], target_industries: list[str],
@@ -313,7 +313,7 @@ def overall_recommendations(resume: dict, functions: list[str], industry_names: 
         "Recommend the highest-impact changes to their resume for these target roles. Be specific to this "
         "resume: quote its wording where useful."
     )
-    data = call_tool(prompt, OVERALL_TOOL, max_tokens=4096,
+    data = call_tool(prompt, OVERALL_TOOL, max_tokens=8000,
                      system=_resume_system(resume["text"], COACH_ROLE))
     jobs_db.save_advice(resume["id"], "overall", key, data)
     return data
@@ -333,7 +333,7 @@ def tailor_resume(resume: dict, job: dict, store=jobs_db) -> dict:
         "existing bullets (copy the original exactly), and only add keywords where the resume shows the "
         "candidate genuinely has that experience.\n\n" + _job_block(job, TAILORING_DESCRIPTION_CHARS)
     )
-    data = call_tool(prompt, TAILOR_TOOL, max_tokens=6000,
+    data = call_tool(prompt, TAILOR_TOOL, max_tokens=16000,
                      system=_resume_system(resume["text"], COACH_ROLE))
     resume_norm = _normalize_ws(resume["text"])
     for rewrite in data.get("bullet_rewrites", []):

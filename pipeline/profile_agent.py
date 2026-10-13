@@ -107,7 +107,7 @@ Design a tracking profile: the industry's main segments, the event types worth t
 
 Search queries should find recent news for that event type; do not put years or dates in them. Call save_industry_profile with the profile."""
 
-    data = call_tool(prompt, build_profile_tool(), max_tokens=4096)
+    data = call_tool(prompt, build_profile_tool(), max_tokens=8000)
     data["id"] = _unique_id(_slug(industry_name))
     data["active"] = False
     # Keep queries only for declared event types, and strip any years the model slipped in

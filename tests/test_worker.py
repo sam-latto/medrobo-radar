@@ -87,7 +87,7 @@ def fake_pipeline(monkeypatch, fail=False):
         industry_id=profile.id, company="Brand New Robotics Co", event_type="funding", segment="humanoids",
         date="2026-10", summary="Raised $10M seed", source_url=url, funding_amount=10_000_000)])
 
-    def synthesis(events, profile, previous, context):
+    def synthesis(events, profile, previous, context, previous_brief_date=None):
         if fail:
             raise RuntimeError("synthesis exploded")
         usage_sink.get()({"purpose": "submit_briefing", "model": "claude-sonnet-4-6", "input_tokens": 1000,

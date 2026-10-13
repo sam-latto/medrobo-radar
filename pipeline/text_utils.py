@@ -15,6 +15,50 @@ def strip_index_refs(text: str) -> str:
     return _INDEX_TAIL_RE.sub("", _INDEX_REF_RE.sub("", text or ""))
 
 
+_ANY_LINK = r"\[([^\]]+)\]\(([^)\s]+)\)"
+_ANY_LINK_RE = re.compile(_ANY_LINK)
+# A parenthesised group of citation links only: "([openFDA](u))", "([Reuters](u1); [FDA](u2))"
+_CITE_GROUP_RE = re.compile(r"\s*\(\s*(?:\[[^\]]+\]\([^)\s]+\)\s*[;,]?\s*)+\)")
+
+
+def _url_key(url: str) -> str:
+    return (url or "").strip().rstrip("/")
+
+
+def drop_unknown_links(text: str, allowed_urls) -> tuple[str, int]:
+    """Keep only links to URLs we collected (the run's and the background events' sources).
+
+    The brief writer copies source URLs into its Markdown; a mistyped or invented URL would reach
+    readers unchecked. An unknown citation is removed; an unknown link in a sentence keeps its text.
+    Returns the cleaned text and how many links were dropped.
+    """
+    allowed = {_url_key(u) for u in allowed_urls if u}
+    dropped = 0
+
+    def known(url: str) -> bool:
+        return _url_key(url) in allowed
+
+    def clean_group(m: re.Match) -> str:
+        nonlocal dropped
+        links = _ANY_LINK_RE.findall(m.group(0))
+        kept = [f"[{label}]({url})" for label, url in links if known(url)]
+        dropped += len(links) - len(kept)
+        if not kept:
+            return ""
+        lead = m.group(0)[: len(m.group(0)) - len(m.group(0).lstrip())]
+        return f"{lead}({'; '.join(kept)})"
+
+    def clean_link(m: re.Match) -> str:
+        nonlocal dropped
+        if known(m.group(2)):
+            return m.group(0)
+        dropped += 1
+        return m.group(1)
+
+    text = _CITE_GROUP_RE.sub(clean_group, text or "")
+    return _ANY_LINK_RE.sub(clean_link, text), dropped
+
+
 def md_safe(text: str) -> str:
     """Escape '$' so Streamlit markdown doesn't render '$500M … $1.4B' as LaTeX math."""
     return _UNESCAPED_DOLLAR_RE.sub(r"\\$", text or "")
