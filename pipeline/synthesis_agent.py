@@ -113,8 +113,11 @@ def _key_items_text(items: list[ExtractedEvent]) -> str:
     lines = []
     for e in items:
         detail = _usd(e.funding_amount) if e.funding_amount else (e.regulatory_status or e.event_type)
-        lines.append(f"- {e.company}: {detail} ({e.event_type}) — {e.summary}")
-    return ("\n\nThe largest deals and the regulatory actions in this run. Cover each one in the brief "
+        lines.append(f"- {e.company}: {detail} ({e.event_type}, {e.date or 'date not reported'}) — {e.summary}")
+        if e.excerpt:
+            lines.append(f'  Source text: "{e.excerpt}"')
+    return ("\n\nThe largest deals and the regulatory actions in this run, with the opening of each source "
+            "so your analysis of them rests on what the source says. Cover each one in the brief "
             "(a sentence is enough for the smaller ones) unless it's clearly off-topic or old news:\n"
             + "\n".join(lines))
 
@@ -199,7 +202,7 @@ Source trust: events with source_type openfda or sec_form_d come from official f
 
 Submit it via the submit_briefing tool.
 
-Write for a {profile.briefing_audience} audience: specific, analytical and plain-spoken, with company names, amounts and dates. Every claim must come from the events below or the background events; do not add outside facts. If this run is thin, write a shorter brief rather than padding it. Never mention the events' index numbers in the brief.{_context_events_text(context_events or [])}{_previous_briefings_text(previous_briefings or [])}"""
+Write for a {profile.briefing_audience} audience: specific, analytical and plain-spoken, with company names, amounts and dates. Every claim must come from the events below or the background events; do not add outside facts. Many events have no date (null): never guess one, and never use today's date for them; write "this week" or leave the date out. State a date only when the event gives it. If this run is thin, write a shorter brief rather than padding it. Never mention the events' index numbers in the brief.{_context_events_text(context_events or [])}{_previous_briefings_text(previous_briefings or [])}"""
 
     try:
         (parsed,) = call_tools([{"prompt": prompt, "tool": BRIEFING_TOOL, "max_tokens": 16000}])

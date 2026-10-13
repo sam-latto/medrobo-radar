@@ -89,3 +89,36 @@ def test_brief_is_given_the_largest_items_and_warns_when_it_skips_one(monkeypatc
     assert key_section.index("Humanoid: $152M") < key_section.index("Mecka AI: $60M")  # biggest first
     assert "Vitestro" in key_section and "Small Co" not in key_section
     assert "doesn't mention key items: Humanoid, Vitestro" in caplog.text
+
+
+def test_excerpt_keeps_the_first_sentences_within_a_limit():
+    from pipeline.extraction_agent import EXCERPT_CHARS, excerpt
+    text = "Humanoid raised $152M.  It is based in London! Total raised is $270M. A fourth sentence."
+    assert excerpt(text) == "Humanoid raised $152M. It is based in London! Total raised is $270M."
+    long = excerpt("word " * 400)
+    assert len(long) <= EXCERPT_CHARS + 1 and long.endswith("…")
+    assert excerpt("") is None and excerpt(None) is None
+
+
+def test_extraction_attaches_the_source_excerpt(monkeypatch):
+    from pipeline import extraction_agent
+    from pipeline.models import RawResult
+    raw = RawResult(title="t", url="https://x.example/h", snippet="Humanoid raised $152M. More text here.",
+                    source="x.example", query_tag="funding:humanoids")
+    monkeypatch.setattr(extraction_agent, "call_tools", lambda reqs: [{"events": [
+        {"result_id": 0, "relevant": True, "company": "Humanoid", "event_type": "funding", "segment": "humanoids",
+         "summary": "Humanoid raised $152M", "funding_amount": 152_000_000}]} for _ in reqs])
+    (event,) = extraction_agent.run_extraction_agent([raw], PROFILE)
+    assert event.excerpt == "Humanoid raised $152M. More text here."
+
+
+def test_key_items_carry_source_text_and_the_brief_is_told_not_to_guess_dates(monkeypatch):
+    prompts = []
+    monkeypatch.setattr("pipeline.llm.call_tool",
+                        lambda prompt, tool, **k: prompts.append(prompt) or {"briefing_text": "Humanoid"})
+    event = ev("Humanoid", amount=152_000_000)
+    event.excerpt = "Humanoid announced a $152M Series A at a $1.35B valuation."
+    synthesis_agent.run_synthesis_agent([event], PROFILE)
+    assert "Humanoid: $152M (funding, date not reported)" in prompts[0]
+    assert 'Source text: "Humanoid announced a $152M Series A at a $1.35B valuation."' in prompts[0]
+    assert "never guess one, and never use today's date" in prompts[0]

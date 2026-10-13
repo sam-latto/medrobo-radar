@@ -25,7 +25,7 @@ AMOUNT_WINDOW_DAYS = 90
 TYPE_WINDOW_DAYS = 7
 AMOUNT_TOLERANCE = 0.02
 SOURCE_RANK = {"openfda": 0, "sec_form_d": 0, "pubmed": 1, "arxiv": 1, "clinicaltrials": 1}
-FILL_FIELDS = ("date", "funding_amount", "product", "regulatory_status", "company")
+FILL_FIELDS = ("date", "funding_amount", "product", "regulatory_status", "company", "excerpt")
 BROAD_TYPES = {"news", "research", "other"}
 
 

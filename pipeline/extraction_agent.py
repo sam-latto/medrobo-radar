@@ -1,4 +1,5 @@
 import logging
+import re
 from config import EXTRACTION_BATCH_SIZE
 from config import EXTRACTION_MODEL
 from pipeline.llm import call_tools
@@ -79,6 +80,19 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
 
 
 PREFILL_FIELDS = ("company", "product", "event_type", "date", "funding_amount", "regulatory_status")
+EXCERPT_SENTENCES = 3
+EXCERPT_CHARS = 600
+
+
+def excerpt(text: str | None) -> str | None:
+    """The first few sentences of a result's text, so the brief writer can ground its analysis
+    of the biggest stories in the source and not only in a one-line summary."""
+    words = " ".join((text or "").split())
+    if not words:
+        return None
+    sentences = re.split(r"(?<=[.!?])\s+", words)
+    short = " ".join(sentences[:EXCERPT_SENTENCES])
+    return short if len(short) <= EXCERPT_CHARS else short[:EXCERPT_CHARS].rsplit(" ", 1)[0] + "…"
 
 
 def _format_result(result_id: int, result: RawResult) -> str:
@@ -152,6 +166,7 @@ def _parse_events(data: dict, batch: list[RawResult], profile: IndustryProfile) 
 
     events: list[ExtractedEvent] = []
     for result, item in items:
+        item["excerpt"] = excerpt(result.snippet)
         item["source_url"] = result.url
         item["source_type"] = result.source_type
         item["industry_id"] = profile.id
