@@ -6,6 +6,7 @@ from database.store import SQLITE, store
 from pipeline.companies import ensure_companies, resolve_companies
 from pipeline.search_agent import run_search_agent
 from pipeline.extraction_agent import run_extraction_agent
+from pipeline.dedupe import merge_duplicates
 from pipeline.synthesis_agent import CONTEXT_DAYS, run_synthesis_agent
 from email_digest.sender import send_digests
 from profiles.loader import IndustryProfile, load_profile, load_profiles
@@ -47,6 +48,15 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
         # Agent 2 — Extraction
         structured_events = run_extraction_agent(raw_results, profile)
 
+        # Earlier events give the brief its context; this run's events aren't stored yet.
+        context_events = sorted(
+            store().get_all_events(industry_id=profile.id,
+                           date_from=(date.today() - timedelta(days=CONTEXT_DAYS)).isoformat()),
+            key=lambda e: str(e.get("date") or ""), reverse=True,
+        )
+        # The same story from several outlets becomes one event; stories already stored are old news
+        structured_events = merge_duplicates(structured_events, context_events)
+
         if not structured_events:
             store().update_run(run_id, "complete", "No events could be extracted from search results.", source_counts)
             return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "complete"}
@@ -57,12 +67,6 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
             if r["status"] == "complete" and r.get("briefing_text") and r["id"] != run_id
             and not r["briefing_text"].startswith("No ")
         ][:3]
-        # Earlier events give the brief its context; this run's events aren't stored yet.
-        context_events = sorted(
-            store().get_all_events(industry_id=profile.id,
-                           date_from=(date.today() - timedelta(days=CONTEXT_DAYS)).isoformat()),
-            key=lambda e: e.get("date") or "", reverse=True,
-        )
         last = previous[0]["run_date"] if previous else None  # date (Postgres) or "YYYY-MM-DD" (SQLite)
         previous_brief_date = date.fromisoformat(str(last)[:10]) if last else None
         briefing_text, notable_indices = run_synthesis_agent(

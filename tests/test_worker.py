@@ -44,10 +44,14 @@ def conn():
     c.execute("delete from public.usage_events where created_at >= date_trunc('month', now())")
     c.execute("delete from public.cache where key like 'budget_alert:%' or key = 'spend_paused' "
               "or key like 'digest_sent:%'")
-    today_runs = "select id from public.pipeline_runs where run_date = current_date"
-    c.execute(f"delete from public.briefs where run_id in ({today_runs}) or brief_date = current_date")
-    c.execute(f"delete from public.events where run_id in ({today_runs})")
-    c.execute("delete from public.pipeline_runs where run_date = current_date")
+    # "Today" is the local date for the worker but UTC in Postgres; in the evening (US time) they
+    # differ, so clear real runs from either day or they make industries look already run
+    since = {"today": TODAY}
+    today_runs = "select id from public.pipeline_runs where run_date >= least(current_date, %(today)s)"
+    c.execute(f"delete from public.briefs where run_id in ({today_runs}) "
+              "or brief_date >= least(current_date, %(today)s)", since)
+    c.execute(f"delete from public.events where run_id in ({today_runs})", since)
+    c.execute("delete from public.pipeline_runs where run_date >= least(current_date, %(today)s)", since)
     try:
         yield c
     finally:

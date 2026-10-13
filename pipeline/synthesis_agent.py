@@ -87,6 +87,44 @@ def _context_events_text(context_events: list[dict]) -> str:
     )
 
 
+KEY_DEALS = 5
+KEY_REGULATORY = 5
+DEAL_TYPES = {"funding", "partnership_ma"}
+
+
+def _usd(amount: int) -> str:
+    for size, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if amount >= size:
+            return f"${amount / size:.3g}{suffix}"
+    return f"${amount:,}"
+
+
+def key_items(events: list[ExtractedEvent]) -> list[ExtractedEvent]:
+    """The run's largest deals and its regulatory actions: the stories a reader expects covered."""
+    deals = sorted((e for e in events if e.event_type in DEAL_TYPES and e.funding_amount and e.company),
+                   key=lambda e: e.funding_amount, reverse=True)[:KEY_DEALS]
+    regulatory = [e for e in events if e.event_type == "regulatory" and e.company][:KEY_REGULATORY]
+    return deals + regulatory
+
+
+def _key_items_text(items: list[ExtractedEvent]) -> str:
+    if not items:
+        return ""
+    lines = []
+    for e in items:
+        detail = _usd(e.funding_amount) if e.funding_amount else (e.regulatory_status or e.event_type)
+        lines.append(f"- {e.company}: {detail} ({e.event_type}) — {e.summary}")
+    return ("\n\nThe largest deals and the regulatory actions in this run. Cover each one in the brief "
+            "(a sentence is enough for the smaller ones) unless it's clearly off-topic or old news:\n"
+            + "\n".join(lines))
+
+
+def uncovered(items: list[ExtractedEvent], briefing_text: str) -> list[str]:
+    """Companies from `items` the brief never names."""
+    text = briefing_text.lower()
+    return [e.company for e in items if e.company.lower() not in text]
+
+
 def run_synthesis_agent(events: list[ExtractedEvent], profile: IndustryProfile,
                         previous_briefings: list[dict] | None = None,
                         context_events: list[dict] | None = None,
@@ -124,6 +162,7 @@ def run_synthesis_agent(events: list[ExtractedEvent], profile: IndustryProfile,
     )
 
     watchlist = ", ".join(profile.watchlist) if profile.watchlist else "none specified"
+    key = key_items(events)
     today_date = date.today()
     today = today_date.strftime("%B %d, %Y")
     days, covered = _coverage(today_date, previous_brief_date)
@@ -134,7 +173,7 @@ def run_synthesis_agent(events: list[ExtractedEvent], profile: IndustryProfile,
 
 Today is {today}. Below are {len(events)} structured events discovered in the latest pipeline run, covering {covered}. {period}
 
-{events_json}
+{events_json}{_key_items_text(key)}
 
 Your task: write the research brief, a 1-2 page market note in the style of an equity research morning note or a business newspaper's industry brief, not a list of news items. Pick the few most important stories from this run, explain what they mean for the industry, and connect them to the earlier events in the background section. Aim for 900-1,300 words.
 
@@ -168,6 +207,9 @@ Write for a {profile.briefing_audience} audience: specific, analytical and plain
             raise parsed
         allowed_urls = [e.source_url for e in events] + [c.get("source_url") for c in context_events or []]
         briefing_text, dropped = drop_unknown_links(strip_index_refs(parsed["briefing_text"]), allowed_urls)
+        missing = uncovered(key, briefing_text)
+        if missing:
+            logger.warning(f"[{profile.id}] Synthesis agent: brief doesn't mention key items: {', '.join(missing)}")
         if dropped:
             logger.warning(f"[{profile.id}] Synthesis agent: removed {dropped} link(s) to URLs not in the events")
         return briefing_text, rule_notable_indices

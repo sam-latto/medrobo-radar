@@ -18,7 +18,8 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
             "type": "boolean",
             "description": (
                 f"false if the result is not really about the {profile.name} industry "
-                "(off-topic article, unrelated company, generic listicle); such results are discarded"
+                "(off-topic article, unrelated company) or isn't a single announcement (roundup, "
+                "newsletter, listicle, listing page); such results are discarded"
             ),
         },
         "company": {
@@ -49,7 +50,8 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
         },
         "funding_amount": {
             "type": "integer",
-            "description": "Amount raised or deal value in USD (e.g. 50000000 for $50M), only if applicable",
+            "description": ("Amount raised or acquisition/merger price in USD (e.g. 50000000 for $50M); "
+                            "never contract, revenue or valuation figures"),
         },
         "regulatory_status": {
             "type": "string",
@@ -113,6 +115,11 @@ def _extract_request(batch: list[RawResult], profile: IndustryProfile) -> dict:
     prompt = f"""You are analyzing {len(batch)} search results for an intelligence platform tracking the {profile.name} industry ({profile.description}).
 
 Extract one structured event per result. Where a result lists authoritative facts from a primary source (FDA, SEC, research databases), keep those facts exactly; classify its segment and write the summary from them. Mark results that are not really about this industry as relevant=false.
+
+Rules:
+- funding_amount is only money raised (equity rounds, grants, debt) or the price of an acquisition or merger. Customer contracts, bookings, revenue, orders, valuations and market-size estimates are not funding: leave funding_amount empty and don't use the funding event type for them.
+- Each event is one announcement. Mark roundups, newsletters, "top 10" lists, index or listing pages, event calendars and job posts as relevant=false: they summarize many stories instead of reporting one.
+- When several results report the same announcement, record each, using the same company name, amount and date in all of them.
 
 {results_text}
 
