@@ -1,8 +1,8 @@
 import uuid
 import logging
 from datetime import date, timedelta
-from database.companies import touch_company
-from database.db import init_db, insert_run, update_run, insert_event, get_all_runs, get_all_events
+from database.db import init_db
+from database.store import SQLITE, store
 from pipeline.companies import ensure_companies, resolve_companies
 from pipeline.search_agent import run_search_agent
 from pipeline.extraction_agent import run_extraction_agent
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def _already_ran_today(industry_id: str) -> bool:
     today = date.today().isoformat()
     return any(
-        r["run_date"] == today and r["status"] == "complete" for r in get_all_runs(industry_id)
+        r["run_date"] == today and r["status"] == "complete" for r in store().get_all_runs(industry_id)
     )
 
 
@@ -29,7 +29,7 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
         return {**base, "run_id": None, "events": 0, "notable": 0, "status": "skipped"}
 
     run_id = str(uuid.uuid4())
-    insert_run(run_id, run_date, triggered_by, profile.id)
+    store().insert_run(run_id, run_date, triggered_by, profile.id)
     logger.info(f"[{profile.id}] Pipeline run {run_id} started (triggered_by={triggered_by})")
 
     try:
@@ -41,25 +41,25 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
 
         if not raw_results:
             logger.warning(f"[{profile.id}] No new results found; completing run with empty briefing.")
-            update_run(run_id, "complete", "No new events found in this run.", source_counts)
+            store().update_run(run_id, "complete", "No new events found in this run.", source_counts)
             return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "complete"}
 
         # Agent 2 — Extraction
         structured_events = run_extraction_agent(raw_results, profile)
 
         if not structured_events:
-            update_run(run_id, "complete", "No events could be extracted from search results.", source_counts)
+            store().update_run(run_id, "complete", "No events could be extracted from search results.", source_counts)
             return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "complete"}
 
         # Agent 3 — Synthesis
         previous = [
-            r for r in get_all_runs(profile.id)
+            r for r in store().get_all_runs(profile.id)
             if r["status"] == "complete" and r.get("briefing_text") and r["id"] != run_id
             and not r["briefing_text"].startswith("No ")
         ][:3]
         # Earlier events give the brief its context; this run's events aren't stored yet.
         context_events = sorted(
-            get_all_events(industry_id=profile.id,
+            store().get_all_events(industry_id=profile.id,
                            date_from=(date.today() - timedelta(days=CONTEXT_DAYS)).isoformat()),
             key=lambda e: e.get("date") or "", reverse=True,
         )
@@ -77,10 +77,10 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
         for i, event in enumerate(structured_events):
             event.is_notable = i in notable_indices
             event.company_id = company_ids.get(event.company)
-            if insert_event(run_id, event.model_dump()) is not None and event.company_id:
-                touch_company(event.company_id, profile.id, event.date)
+            if store().insert_event(run_id, event.model_dump()) is not None and event.company_id:
+                store().touch_company(event.company_id, profile.id, event.date)
 
-        update_run(run_id, "complete", briefing_text, source_counts)
+        store().update_run(run_id, "complete", briefing_text, source_counts)
 
         logger.info(
             f"[{profile.id}] Pipeline run {run_id} complete: "
@@ -98,7 +98,7 @@ def _run_profile(profile: IndustryProfile, run_date: str, triggered_by: str, for
 
     except Exception as e:
         logger.error(f"[{profile.id}] Pipeline run {run_id} failed: {e}", exc_info=True)
-        update_run(run_id, "failed", source_counts=base.get("source_counts"))
+        store().update_run(run_id, "failed", source_counts=base.get("source_counts"))
         return {**base, "run_id": run_id, "events": 0, "notable": 0, "status": "failed", "error": str(e)}
 
 
@@ -115,7 +115,8 @@ def _overall_status(statuses: list[str]) -> str:
 def run_pipeline(profile_id: str | None = None, triggered_by: str = "schedule", force: bool = False) -> dict:
     """Run the research pipeline for one industry, or for every active profile if
     `profile_id` is None. Returns totals plus a per-industry summary in `runs`."""
-    init_db()
+    if store() is SQLITE:
+        init_db()
     run_date = date.today().isoformat()
 
     profiles = [load_profile(profile_id)] if profile_id else load_profiles(active_only=True)

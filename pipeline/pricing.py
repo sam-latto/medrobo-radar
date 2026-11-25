@@ -5,6 +5,7 @@ Cache writes (5-minute TTL) cost 1.25x the input price; cache reads use the list
 price, or 0.1x the input price where none is listed.
 """
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,16 @@ PRICES_PER_MTOK: dict[str, tuple[float, float, float | None]] = {
 CACHE_WRITE_MULTIPLIER = 1.25
 CACHE_READ_MULTIPLIER = 0.1
 
+# Tavily bills in credits: a basic search is 1 credit, an advanced search 2.
+# Pay-as-you-go price per credit; set TAVILY_USD_PER_CREDIT to match your plan.
+TAVILY_USD_PER_CREDIT = float(os.getenv("TAVILY_USD_PER_CREDIT", "0.008"))
+TAVILY_CREDITS = {"basic": 1, "advanced": 2}
+
 _warned: set[str] = set()
+
+
+def search_cost_usd(depth: str = "basic") -> float:
+    return round(TAVILY_CREDITS.get(depth, 1) * TAVILY_USD_PER_CREDIT, 6)
 
 
 def cost_usd(model: str, input_tokens: int = 0, output_tokens: int = 0,

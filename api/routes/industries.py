@@ -1,8 +1,11 @@
 """Industry catalog, the user's followed industries, and requests for new ones."""
 import re
+from typing import Annotated
+
+import psycopg
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from api.auth import CurrentUser, current_user
 from api.db import as_user
@@ -75,7 +78,7 @@ def replace_subscriptions(body: SubscriptionsUpdate, user: CurrentUser = Depends
 
 
 class IndustryRequest(BaseModel):
-    label: str = Field(min_length=2, max_length=120)
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
 
 
 def _words(text: str) -> set[str]:
@@ -93,7 +96,7 @@ def best_match(label: str, industries: list[dict]) -> dict | None:
 
 @router.post("/industries/requests", status_code=201)
 def request_industry(body: IndustryRequest, user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
-    label = body.label.strip()
+    label = body.label
     name = label[0].upper() + label[1:]
     with as_user(conn, user.id):
         industries = conn.execute(
@@ -104,9 +107,18 @@ def request_industry(body: IndustryRequest, user: CurrentUser = Depends(current_
             "insert into public.custom_industry_requests (user_id, label, matched_industry_id, status) "
             "values (%s, %s, %s, %s)", (user.id, name, match["id"] if match else None, status))
         if match:
+            following = conn.execute("select count(*) as n from public.subscriptions where user_id = %s",
+                                     (user.id,)).fetchone()["n"]
+            already = conn.execute("select focus from public.subscriptions where user_id = %s and industry_id = %s",
+                                   (user.id, match["id"])).fetchone()
+            if already is None and following >= MAX_SUBSCRIPTIONS:
+                raise ApiError(422, "too_many_industries",
+                               f"You can follow up to {MAX_SUBSCRIPTIONS} industries. Remove one first.")
+            # Keep a focus the user already set on that industry
             conn.execute(
                 """insert into public.subscriptions (user_id, industry_id, focus) values (%s, %s, %s)
-                   on conflict (user_id, industry_id) do update set focus = excluded.focus""",
+                   on conflict (user_id, industry_id) do update
+                   set focus = coalesce(public.subscriptions.focus, excluded.focus)""",
                 (user.id, match["id"], name))
     if match:
         message = (f'"{name}" added as a focus within {match["name"]}. Your brief for '

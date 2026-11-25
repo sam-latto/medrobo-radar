@@ -3,7 +3,8 @@ import difflib
 import logging
 import re
 
-from database import companies as company_db
+from config import EXTRACTION_MODEL
+from database.store import store
 from pipeline.llm import call_tool
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def _ask_claude_to_match(ambiguous: list[tuple[str, list[dict]]]) -> dict[int, i
         "including subsidiaries/divisions that are usually reported separately, or if unsure.\n\n"
         + "\n".join(lines)
     )
-    data = call_tool(prompt, MATCH_TOOL, max_tokens=4096)
+    data = call_tool(prompt, MATCH_TOOL, max_tokens=4096, model=EXTRACTION_MODEL)
     out: dict[int, int | None] = {}
     for m in data.get("matches", []):
         idx, cid = m.get("index"), m.get("company_id")
@@ -98,7 +99,7 @@ def resolve_companies(names: list[str], industry_id: str | None, use_llm: bool =
     Exact normalized matches are free; near-matches are confirmed by one batched
     Claude call. Names that normalize to nothing (e.g. 'Unknown') are omitted.
     """
-    known = {c["normalized_name"]: c for c in company_db.list_companies()}
+    known = {c["normalized_name"]: c for c in store().list_companies()}
     resolved: dict[str, int] = {}
     pending: dict[str, str] = {}  # normalized -> display name for names needing a decision
 
@@ -131,7 +132,7 @@ def resolve_companies(names: list[str], industry_id: str | None, use_llm: bool =
         else:
             new_names.append(display)
     for display in new_names:
-        by_norm[normalize_name(display)] = company_db.insert_company(display, normalize_name(display), industry_id)
+        by_norm[normalize_name(display)] = store().insert_company(display, normalize_name(display), industry_id)
 
     for raw in names:
         norm = normalize_name(raw)
@@ -150,8 +151,8 @@ def ensure_companies(names: list[str], industry_id: str) -> None:
     for name in names:
         norm = normalize_name(name)
         if norm:
-            cid = company_db.insert_company(name, norm, industry_id)
-            company_db.touch_company(cid, industry_id, None)
+            cid = store().insert_company(name, norm, industry_id)
+            store().touch_company(cid, industry_id, None)
 
 
 def link_events(events: list[dict], use_llm: bool = True) -> int:
@@ -166,8 +167,8 @@ def link_events(events: list[dict], use_llm: bool = True) -> int:
             cid = mapping.get(e.get("company"))
             if cid is None:
                 continue
-            company_db.set_event_company(e["id"], cid)
-            company_db.touch_company(cid, industry_id, e.get("date"))
+            store().set_event_company(e["id"], cid)
+            store().touch_company(cid, industry_id, e.get("date"))
             linked += 1
     return linked
 
@@ -177,7 +178,7 @@ def find_companies(name: str, limit: int = 8) -> list[dict]:
     norm = normalize_name(name)
     if not norm:
         return []
-    known = {c["normalized_name"]: c for c in company_db.list_companies()}
+    known = {c["normalized_name"]: c for c in store().list_companies()}
     if norm in known:
         return [known[norm]]
     contains = [c for n, c in known.items() if norm in n or n in norm.split()]

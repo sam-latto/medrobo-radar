@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 from database import jobs_db
-from jobs.functions import matching_functions
+from jobs.functions import keyword_matchers, matching_functions
+from jobs.resume import MAX_RESUME_CHARS
 from pipeline.llm import call_tool
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ def _resume_system(resume_text: str, role: str) -> list[dict]:
     # The resume is identical across calls, so cache it as the prompt prefix
     return [{
         "type": "text",
-        "text": f"{role}\n\n<resume>\n{resume_text}\n</resume>",
+        "text": f"{role}\n\n<resume>\n{resume_text[:MAX_RESUME_CHARS]}\n</resume>",
         "cache_control": {"type": "ephemeral"},
     }]
 
@@ -68,10 +69,11 @@ def candidate_jobs(industry_ids: list[str], functions: list[str], locations: lis
     seen: set[tuple] = set()
     if postings is None:
         postings = jobs_db.list_active_postings(industry_ids)
+    matchers = keyword_matchers(functions)
     # Board postings first, so they win over web-search copies of the same job
     postings = sorted(postings, key=lambda j: j["provider"] == "web")
     for job in postings:
-        fns = matching_functions(job["title"], functions)
+        fns = matching_functions(job["title"], functions, matchers)
         if not fns or not location_ok(job, locations, include_remote, remote_only):
             continue
         key = ((job.get("company") or "").lower(), job["title"].lower(), (job.get("location") or "").lower())
@@ -166,7 +168,7 @@ def score_jobs(resume: dict, jobs: list[dict], target_industries: list[str],
     system = _resume_system(resume["text"], SCORING_ROLE)
     batches = [todo[i:i + SCORE_BATCH_SIZE] for i in range(0, len(todo), SCORE_BATCH_SIZE)]
     progress(f"Scoring {len(todo)} jobs against your resume…")
-    scored = 0
+    scored = failed_batches = 0
     with ThreadPoolExecutor(max_workers=SCORING_WORKERS) as pool:
         futures = {pool.submit(contextvars.copy_context().run, _score_batch, b, system, target_industries): b
                    for b in batches}
@@ -176,20 +178,27 @@ def score_jobs(resume: dict, jobs: list[dict], target_industries: list[str],
                 data = future.result()
             except Exception as e:
                 logger.error(f"Job scoring batch failed: {e}")
+                failed_batches += 1
                 continue
             for s in data.get("scores", []):
                 job = by_id.get(s.get("job_id"))
                 if not job:
                     continue
                 score = max(0, min(100, int(s.get("score", 0))))
-                store.save_match(job["id"], resume["id"], score, s.get("summary", ""),
-                                   s.get("strengths", [])[:3], s.get("gaps", [])[:3], s.get("level_fit"),
-                                   s.get("industry_match"))
-                company = (s.get("company") or "").strip()
-                if company.lower() not in _PLACEHOLDER_COMPANIES and not job.get("company"):
-                    store.update_posting_company(job["id"], company)
+                try:  # one bad row (e.g. the resume was deleted meanwhile) shouldn't lose the rest
+                    store.save_match(job["id"], resume["id"], score, s.get("summary", ""),
+                                     s.get("strengths", [])[:3], s.get("gaps", [])[:3], s.get("level_fit"),
+                                     s.get("industry_match"))
+                    company = (s.get("company") or "").strip()
+                    if company.lower() not in _PLACEHOLDER_COMPANIES and not job.get("company"):
+                        store.update_posting_company(job["id"], company)
+                except Exception as e:
+                    logger.error(f"Could not save a job match: {e}")
+                    continue
                 scored += 1
             progress(f"Scored {scored}/{len(todo)} jobs")
+    if failed_batches == len(batches):
+        raise RuntimeError("every scoring batch failed")
     return scored
 
 

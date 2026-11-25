@@ -2,9 +2,12 @@
 import logging
 import uuid
 from pathlib import Path
+from typing import Annotated
+
+import psycopg
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from api import limits
 from api.auth import CurrentUser, current_user
@@ -12,7 +15,7 @@ from api.db import as_service, as_user
 from api.deps import get_conn
 from api.errors import ApiError, not_found
 from api.stores import PgJobsStore
-from api.tasks import create_task, run_task
+from api.tasks import run_task, start_metered_task
 from jobs import matcher
 from jobs.resume import MAX_RESUME_CHARS, ResumeParseError, extract_text
 
@@ -20,6 +23,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["jobs"])
 
 MAX_RESUMES = 5
+MAX_ROLE_TYPES = 20
+MAX_CUSTOM_ROLE_TYPES = 10
+RoleType = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 CONTENT_TYPES = {
     ".pdf": "application/pdf",
@@ -42,25 +48,28 @@ def list_resumes(user: CurrentUser = Depends(current_user), conn=Depends(get_con
 
 
 @router.post("/resumes", status_code=201)
-def upload_resume(request: Request, file: UploadFile = File(...), role_types: list[str] = Form(default=[]),
+def upload_resume(request: Request, file: UploadFile = File(...),
+                  role_types: list[RoleType] = Form(default=[], max_length=MAX_ROLE_TYPES),
                   user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
-    suffix = Path(file.filename or "").suffix.lower()
+    filename = (file.filename or "")[:255]
+    suffix = Path(filename).suffix.lower()
     if suffix not in CONTENT_TYPES:
         raise ApiError(422, "unsupported_file", "Upload a PDF, Word (.docx) or text file.")
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(422, "file_too_large", "Resumes must be 5 MB or smaller.")
     try:  # the file type is already checked, so a parse error means too little readable text
-        text = extract_text(file.filename, data)[:MAX_RESUME_CHARS]
+        text = extract_text(filename, data)[:MAX_RESUME_CHARS]
     except ResumeParseError as e:
         raise ApiError(422, "unreadable_file", str(e))
     except Exception:
         raise ApiError(422, "unreadable_file", "We couldn't read that file. Try saving it as a PDF again.")
+    too_many = ApiError(422, "too_many_resumes", f"You can keep up to {MAX_RESUMES} resumes. Delete one first.")
     with as_user(conn, user.id):
         count = conn.execute("select count(*) as n from public.resumes where user_id = %s",
                              (user.id,)).fetchone()["n"]
     if count >= MAX_RESUMES:
-        raise ApiError(422, "too_many_resumes", f"You can keep up to {MAX_RESUMES} resumes. Delete one first.")
+        raise too_many
 
     path = f"{user.id}/{uuid.uuid4()}{suffix}"
     request.app.state.admin.upload_resume(path, data, CONTENT_TYPES[suffix])
@@ -69,7 +78,10 @@ def upload_resume(request: Request, file: UploadFile = File(...), role_types: li
             row = conn.execute(
                 f"insert into public.resumes (user_id, filename, storage_path, text, role_types) "
                 f"values (%s, %s, %s, %s, %s) returning {RESUME_FIELDS}",
-                (user.id, file.filename, path, text, role_types)).fetchone()
+                (user.id, filename, path, text, role_types)).fetchone()
+    except psycopg.errors.CheckViolation:  # two uploads at once: the database's row limit caught it
+        request.app.state.admin.delete_files([path])
+        raise too_many
     except Exception:
         request.app.state.admin.delete_files([path])
         raise
@@ -77,7 +89,7 @@ def upload_resume(request: Request, file: UploadFile = File(...), role_types: li
 
 
 class ResumeUpdate(BaseModel):
-    role_types: list[str] = Field(max_length=20)
+    role_types: list[RoleType] = Field(max_length=MAX_ROLE_TYPES)
 
 
 @router.patch("/resumes/{resume_id}")
@@ -99,7 +111,8 @@ def delete_resume(request: Request, resume_id: uuid.UUID, user: CurrentUser = De
                            (resume_id, user.id)).fetchone()
     if row is None:
         raise not_found("Resume not found.")
-    if row["storage_path"]:
+    # Only ever delete inside the user's own folder (the secret key bypasses storage rules)
+    if row["storage_path"] and row["storage_path"].startswith(f"{user.id}/"):
         try:
             request.app.state.admin.delete_files([row["storage_path"]])
         except Exception:
@@ -109,13 +122,14 @@ def delete_resume(request: Request, resume_id: uuid.UUID, user: CurrentUser = De
 # ── Preferences ──────────────────────────────────────────────────────────────
 
 class JobPreferences(BaseModel):
-    role_types: list[str] = Field(default_factory=list, max_length=20)
+    role_types: list[RoleType] = Field(default_factory=list, max_length=MAX_ROLE_TYPES)
     custom_role_types: str = Field(default="", max_length=300)
-    locations: list[str] = Field(default_factory=list, max_length=20)
+    locations: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]] = Field(
+        default_factory=list, max_length=20)
     include_remote: bool = True
     remote_only: bool = False
-    seniority: list[str] = Field(default_factory=list, max_length=10)
-    industry_ids: list[str] = Field(default_factory=list, max_length=25)
+    seniority: list[Annotated[str, StringConstraints(max_length=50)]] = Field(default_factory=list, max_length=10)
+    industry_ids: list[Annotated[str, StringConstraints(max_length=64)]] = Field(default_factory=list, max_length=25)
 
 
 def _preferences(conn, user_id) -> dict:
@@ -145,7 +159,8 @@ def put_preferences(body: JobPreferences, user: CurrentUser = Depends(current_us
 # ── Find & score ─────────────────────────────────────────────────────────────
 
 def all_role_types(prefs: dict) -> list[str]:
-    custom = [r.strip() for r in prefs["custom_role_types"].split(",") if r.strip()]
+    """Chosen role types plus up to MAX_CUSTOM_ROLE_TYPES typed-in ones (each a search cost)."""
+    custom = [r.strip()[:100] for r in prefs["custom_role_types"].split(",") if r.strip()][:MAX_CUSTOM_ROLE_TYPES]
     return list(dict.fromkeys(prefs["role_types"] + custom))
 
 
@@ -201,7 +216,7 @@ def start_search(request: Request, background: BackgroundTasks, user: CurrentUse
     with as_user(conn, user.id):
         prefs = _preferences(conn, user.id)
         resumes = conn.execute("select id, text, role_types from public.resumes where user_id = %s "
-                               "order by created_at desc", (user.id,)).fetchall()
+                               "order by created_at desc limit %s", (user.id, MAX_RESUMES)).fetchall()
         industry_ids = prefs["industry_ids"] or [r["industry_id"] for r in conn.execute(
             "select industry_id from public.subscriptions where user_id = %s", (user.id,))]
         names = [r["name"] for r in conn.execute("select name from public.industries where id = any(%s)",
@@ -213,10 +228,10 @@ def start_search(request: Request, background: BackgroundTasks, user: CurrentUse
     if not industry_ids:
         raise ApiError(422, "no_industries", "Choose at least one industry first.")
 
-    usage_id = limits.reserve(conn, user.id, limits.FIND_JOBS)
-    task_id = create_task(conn, user.id, "find_jobs")
-    background.add_task(run_task, request.app.state.db, task_id, user.id, usage_id,
-                        find_and_score(user.id, prefs, resumes, industry_ids, names))
+    task_id, usage_id, is_new = start_metered_task(conn, user.id, "find_jobs", limits.FIND_JOBS, "find_jobs")
+    if is_new:
+        background.add_task(run_task, request.app.state.db, task_id, user.id, usage_id,
+                            find_and_score(user.id, prefs, resumes, industry_ids, names))
     return {"task_id": task_id, "status": "queued"}
 
 
@@ -308,8 +323,10 @@ def start_tailoring(job_id: int, request: Request, background: BackgroundTasks,
     if cached:  # already tailored: free
         return {"status": "complete", "resume_id": resume["id"], "advice": cached["content"]}
 
-    usage_id = limits.reserve(conn, user.id, limits.TAILOR_RESUME)
-    task_id = create_task(conn, user.id, "tailor_resume")
+    task_id, usage_id, is_new = start_metered_task(
+        conn, user.id, "tailor_resume", limits.TAILOR_RESUME, f"tailor:{job_id}:{resume['id']}")
+    if not is_new:  # a double click: the same tailoring is already running
+        return {"status": "queued", "task_id": task_id, "resume_id": resume["id"]}
 
     def work(task_conn, progress) -> dict:
         progress("Reading the posting and your resume…")

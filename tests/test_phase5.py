@@ -12,11 +12,11 @@ PROFILE = load_profile("healthcare_robotics")
 def test_synthesis_includes_previous_briefings(monkeypatch):
     prompts = []
 
-    def fake_call_tool(prompt, tool, max_tokens=4096, system=None):
+    def fake_call_tool(prompt, tool, max_tokens=4096, system=None, **kwargs):
         prompts.append(prompt)
         return {"briefing_text": "b", "additional_notable_indices": []}
 
-    monkeypatch.setattr(synthesis_agent, "call_tool", fake_call_tool)
+    monkeypatch.setattr("pipeline.llm.call_tool", fake_call_tool)
     events = [ExtractedEvent(event_type="news", summary="s", source_url="u")]
     synthesis_agent.run_synthesis_agent(events, PROFILE, [
         {"run_date": "2026-09-28", "briefing_text": "Yesterday: CMR raised $200M."},
@@ -65,7 +65,7 @@ def test_failure_alert_email(monkeypatch):
 
 def test_synthesis_includes_context_events(monkeypatch):
     prompts = []
-    monkeypatch.setattr(synthesis_agent, "call_tool", lambda prompt, tool, **k: (
+    monkeypatch.setattr("pipeline.llm.call_tool", lambda prompt, tool, **k: (
         prompts.append(prompt) or {"briefing_text": "b", "additional_notable_indices": []}))
     events = [ExtractedEvent(event_type="news", summary="s", source_url="u")]
     synthesis_agent.run_synthesis_agent(events, PROFILE, context_events=[

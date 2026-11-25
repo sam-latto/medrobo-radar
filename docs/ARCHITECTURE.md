@@ -229,7 +229,8 @@ RLS is turned on for **every** table. Policies:
 | Tables | Read | Write |
 |---|---|---|
 | `communities`, `industries`, `plans` | Any signed-in user | Service role only |
-| `events`, `briefs`, `companies`, `company_industries`, `pipeline_runs` | Any signed-in user | Service role only (worker) |
+| `events`, `briefs`, `companies`, `company_industries` | Any signed-in user | Service role only (worker) |
+| `pipeline_runs` | Nobody (worker bookkeeping; its error details can contain upstream URLs) | Service role only |
 | `job_postings`, `job_posting_industries`, `job_boards` | Any signed-in user | Service role only |
 | `profiles` | Own row (`id = auth.uid()`) | Own row, but not `plan_id` or `community_id` |
 | `subscriptions`, `watchlist`, `resumes`, `job_preferences`, `job_matches`, `resume_advice`, `custom_industry_requests` | Own rows (`user_id = auth.uid()`) | Own rows |
@@ -306,21 +307,57 @@ tasks (id uuid pk, user_id uuid, kind text, status text, progress jsonb,
 
 **Spend controls (budget ~$300/month):**
 - Hard monthly spend limits set in the Anthropic and Tavily consoles.
-- A daily check in the worker sums `usage_events.cost_usd` for the month; at 80% of budget it emails Sam, at 100% it pauses tailoring and new industry pipelines (briefs keep running).
+- A daily check in the worker sums `usage_events.cost_usd` for the month (`MONTHLY_BUDGET_USD`, default 300); at 80% of budget it emails Sam, at 100% it pauses job search, resume tailoring and new industry pipelines until the 1st (briefs keep running). The pause is a `spend_paused` row in the `cache` table that the API checks; the API answers `503 paused`.
 
 ---
 
 ## 8. Pipeline worker
 
-`worker/run_daily.py`, run once a day by a Render cron job (early morning US Eastern), replaces the APScheduler in `main.py`.
+`python -m worker.run_daily`, run once a day by a Render cron job (early morning US Eastern), replaces the APScheduler in `main.py` for the hosted app. `--dry-run` lists what would run and the month's spend without changing anything; `--industry X --force --no-email --no-jobs` runs one industry by hand.
 
-1. Find industries to run: `status = 'active'`, has `profile_yaml`, and has at least one subscriber.
-2. For each, call the existing `run_pipeline` logic (collect → extract → companies → brief) against Postgres. Industries run one after another to stay within API rate limits.
-3. Recheck job postings for closed/moved roles (existing `recheck_postings`).
-4. Send the daily email to users with `email_brief_opt_in = true`, one email per user covering their industries.
-5. Write the run's cost to `pipeline_runs.cost_usd`, run the budget check, and send a failure alert if any industry failed (existing retry/alert logic).
+1. **Budget check first.** If this month's spend has reached the budget, industries that have never run aren't started (existing briefs keep running).
+2. **Find industries to run:** `kind = 'industry'`, `status = 'active'`, has `profile_yaml`, and at least one follower.
+3. **Run each one** with the existing pipeline code (search → extract → companies → brief), pointed at Postgres: the pipeline, company and job code read the current data store (`database/store.py`), which is SQLite for the local app and `PgStore` (`database/pg_store.py`) for the worker. A failed industry is retried once.
+4. **Refresh job postings** for each industry (existing `collect_jobs`): re-check older postings, read the job boards of tracked companies, and search career sites for the role types that the industry's followers chose. Users' job searches then score these stored postings.
+5. **Email** each user with `email_brief_opt_in = true` one digest of today's briefs for the industries they follow.
+6. **Record cost:** every Claude call and Tavily search is written to `usage_events` against the industry, and each run's total goes to `pipeline_runs.cost_usd`. Search cost is an estimate from credits (`TAVILY_USD_PER_CREDIT`, default $0.008; advanced searches are 2 credits).
+7. **Alerts** (to `EMAIL_TO`): industries that failed twice; 80% of the monthly budget used (once a month); budget reached.
 
-Custom focuses (e.g. "Surgical robotics" inside Healthcare robotics) don't create new runs. They filter what that user sees and are passed to brief writing as an extra emphasis later if needed.
+### Cost design
+
+Industry data is shared, so pipeline cost grows with the number of followed industries, not users. On top of that:
+
+- **Weekly for small audiences.** Industries with fewer than `LOW_FOLLOWER_THRESHOLD` (3) followers run once a week instead of daily; an industry's first run happens right away.
+- **Message Batches (50% off).** In the worker, extraction and brief writing go through the Claude Message Batches API (`WORKER_USE_BATCH_API=1`). Most batches finish within minutes. A batch still running after 60 minutes is canceled; requests that already finished are kept (they're billed even when canceled) and only the rest are made directly. A batch that fails to start is made directly. Nothing is paid for twice.
+- **Cheaper model for structured steps.** Event extraction and company matching use `EXTRACTION_MODEL` (default Claude Haiku 5.5, $0.10 / $0.50 per million tokens for prompts up to 100K tokens, which extraction prompts are); the brief and the resume features keep `ANTHROPIC_MODEL`. Quality check pending: compare a real run's extraction against the previous model before launch.
+- **Personalize by filtering, never by rewriting.** A user's focus (e.g. "Surgical robotics" inside Healthcare robotics) never creates a run or a Claude call. It flags matching events (`matches_focus`, `focus_only=true` on `/events`), lists them under the shared brief (`focus_events` on `/briefs`), and adds a short "For your focus" list to that user's email.
+
+---
+
+### Hardening after the multi-agent review (October 2026)
+
+**Option A: the API is the only way into the database.** Supabase's Data API (direct REST access to tables) is turned off for the `public` schema in the dashboard, so students can't write their own rows around the API's limits. The website uses Supabase only for sign-in, so nothing depends on it.
+- *Guard:* `tests/test_supabase_rls.py::test_supabase_rest_access_to_tables_is_off` fails if anyone turns it back on.
+- *Backstop:* `supabase/migrations/20261012000001_limits.sql` makes the database enforce the limits itself: array sizes and text lengths on job preferences, resumes and focus text; resume files only under the owner's folder; at most 5 resumes, 25 followed industries, 50 industry requests and 500 watched companies per user (counted under a lock, so parallel requests can't race past them).
+- *When to move to Option B:* if the website ever needs to read the database directly (e.g. live updates via Supabase Realtime), first give the API its own database role and take write access away from the `authenticated` role. Don't just reopen the Data API.
+
+**Sign-in:** the sign-up trigger accepts only Google sign-ins (`provider = google`) from a community's email domain. In the Supabase dashboard, keep Google as the only enabled provider.
+
+**Usage limits match real spend:**
+- A failed task refunds the user's reservation only if no paid call was made. Otherwise it still counts, so a user can't get repeat refunds by making work fail on purpose.
+- A search where every Claude call failed is reported as failed (and refunded).
+- A double click on Find jobs or Tailor returns the task already running instead of charging twice.
+- Tasks stuck by a restart are failed and refunded after 30 minutes (swept at API startup and by the worker).
+
+**Worker resilience:**
+- One industry's error, or an email outage, never stops the others, the failure alert or the digests.
+- Each opted-in user gets at most one digest per day, even if the worker runs twice.
+- While the budget is paused, the nightly job-posting refresh (paid career-site searches) is skipped too.
+- Career-site searches cover only the 10 role types most requested in each industry (`MAX_ROLE_TYPES_PER_INDUSTRY`).
+- Role-type keyword lists are cached in Postgres.
+- `MONTHLY_BUDGET_USD=0` means "keep paid features paused".
+
+**Emails:** links in briefs can't break out of their `href`, only `http(s)` source links are allowed, and logs never include a recipient's address. Set `APP_URL` in production, or the "Open Industry Radar" link points to localhost.
 
 ---
 
@@ -333,7 +370,7 @@ A one-time script, `scripts/migrate_sqlite_to_postgres.py`, run against the dev 
 3. **Shared data:** copy `pipeline_runs`, `events`, `companies` (+ `company_industries`), `job_boards`, `job_board_checks`, `job_postings` (+ `job_posting_industries`). Move each run's `briefing_text` into `briefs`. Map SQLite integer run ids to new uuids.
 4. **Sam's personal data:** after Sam signs in once (so the account exists), copy `resumes`, `job_matches`, `resume_advice` and the job preferences from `app_settings` with `user_id` = Sam's id. Upload resume files to Storage if the originals are available; otherwise keep the extracted text.
 5. **Subscriptions:** subscribe Sam to the three existing industries.
-6. **Check:** row counts match between SQLite and Postgres for each table; spot-check a brief, an event and a job match in the API.
+6. **Check:** every SQLite row is in Postgres (Postgres can have more once the worker runs); spot-check a brief, an event and a job match in the API. For the owner's personal data after first sign-in, run with `--personal-only --owner-email ...`.
 
 The local SQLite app keeps working until the new app is live, so nothing is lost if the migration needs to be rerun.
 
@@ -356,7 +393,7 @@ The local SQLite app keeps working until the new app is live, so nothing is lost
 
 ---
 
-**Running the API locally:** `uvicorn api.main:app --reload`, then open http://localhost:8000/api/v1/docs. End-to-end tests: `RUN_DB_TESTS=1 python -m pytest tests/test_api.py tests/test_supabase_rls.py` (run against dev in a rolled-back transaction, with Claude and Supabase Storage faked).
+**Running the API locally:** `uvicorn api.main:app --reload`, then open http://localhost:8000/api/v1/docs. End-to-end tests: `RUN_DB_TESTS=1 python -m pytest tests/test_api.py tests/test_supabase_rls.py tests/test_worker.py` (run against dev in a rolled-back transaction, with Claude and Supabase Storage faked).
 
 ---
 

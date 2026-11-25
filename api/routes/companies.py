@@ -81,18 +81,18 @@ def get_company(company_id: int, user: CurrentUser = Depends(current_user), conn
                       funding_amount, regulatory_status
                from public.events where company_id = %s order by date desc nulls last, id desc limit 100""",
             (company_id,)).fetchall()
+        # Companies sharing an industry, ranked by their recent events in those industries
         similar = conn.execute(
-            """select c.id, c.name, c.description, count(e.id) as events_90d
-               from public.company_industries mine
-               join public.company_industries other
-                 on other.industry_id = mine.industry_id and other.company_id <> mine.company_id
-               join public.companies c on c.id = other.company_id
-               left join public.events e
-                 on e.company_id = c.id and e.date >= current_date - %s
-               where mine.company_id = %s
-               group by c.id, c.name, c.description
-               order by count(e.id) desc, c.name limit 5""",
-            (momentum.WINDOW_DAYS, company_id)).fetchall()
+            """with mine as (select industry_id from public.company_industries where company_id = %(id)s),
+                    peers as (select distinct ci.company_id from public.company_industries ci
+                              join mine using (industry_id) where ci.company_id <> %(id)s)
+               select c.id, c.name, c.description,
+                      (select count(*) from public.events e
+                       where e.company_id = c.id and e.industry_id in (select industry_id from mine)
+                         and e.date between current_date - %(days)s and current_date) as events_90d
+               from peers join public.companies c on c.id = peers.company_id
+               order by events_90d desc, c.name limit 5""",
+            {"id": company_id, "days": momentum.WINDOW_DAYS}).fetchall()
         hiring = conn.execute(
             """select id, title, location, url, posted_at from public.job_postings
                where active and lower(company) = lower(%s) order by first_seen_at desc limit 10""",

@@ -25,7 +25,8 @@ def html_safe_dollars(text: str) -> str:
     return (text or "").replace("$", "&#36;")
 
 
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+# Quotes and angle brackets are excluded so a link can't break out of href="..."
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)\"'<>]+)\)")
 _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _MD_ITALIC_RE = re.compile(r"(?<![\*\w])\*(?!\s)(.+?)(?<!\s)\*(?![\*\w])")
 _MD_HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
@@ -39,6 +40,8 @@ _HEADING_STYLES = {
 
 
 def _md_inline(text: str) -> str:
+    # The text is already HTML-escaped and the URL pattern refuses quotes, so the URL is
+    # safe inside href="..." as is
     text = _MD_LINK_RE.sub(lambda m: f'<a href="{m.group(2)}" style="color:#1e5b72;">{m.group(1)}</a>', text)
     text = _MD_BOLD_RE.sub(r"<strong>\1</strong>", text)
     return _MD_ITALIC_RE.sub(r"<em>\1</em>", text)
