@@ -8,7 +8,7 @@ Government and university sites (.gov, .edu, .ac.uk) and company newsrooms on th
 domain (news.medtronic.com, newsroom.intuitive.com) count as primary. Industry profiles can
 add their own trade outlets under `trusted_domains`.
 """
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 PRIMARY_DOMAINS = [
     # Official records and research databases
@@ -45,6 +45,30 @@ NEWSROOM_PREFIXES = ("news.", "newsroom.", "press.", "investors.", "investor.", 
 TRUSTED_SOURCE_TYPES = {"openfda", "sec_form_d", "pubmed", "arxiv", "clinicaltrials"}
 
 
+# Links that send the reader somewhere else (newsletter click trackers, shorteners, news
+# aggregators). Even on a trusted site, the reader doesn't land on a checkable article.
+REDIRECT_HOSTS = {
+    "t.co", "bit.ly", "lnkd.in", "ow.ly", "buff.ly", "tinyurl.com", "rebrand.ly", "flip.it", "trib.al",
+    "dlvr.it", "apple.news", "feedproxy.google.com", "news.google.com",
+}
+REDIRECT_PATH_STEPS = {"click", "clicks", "redirect", "redir", "track", "tracking", "trk"}
+REDIRECT_QUERY_KEYS = {"url", "u", "redirect", "redirect_url", "redirect_uri", "target", "dest", "destination", "to"}
+# Aggregators whose hosts look like company newsrooms ("news.") but aren't
+NOT_NEWSROOMS = {"news.google.com", "news.yahoo.com", "news.ycombinator.com", "news.bing.com", "news.msn.com"}
+
+
+def is_redirect(url: str) -> bool:
+    """True for click-tracking, shortened or aggregator links, e.g. link.axios.com/click/…"""
+    parsed = urlparse(url)
+    host = _host(url)
+    if host in REDIRECT_HOSTS:
+        return True
+    if REDIRECT_PATH_STEPS & {step.lower() for step in parsed.path.split("/") if step}:
+        return True
+    return any(key.lower() in REDIRECT_QUERY_KEYS and value.lower().startswith(("http://", "https://", "http%3a"))
+               for key, value in parse_qsl(parsed.query))
+
+
 def _host(url: str) -> str:
     host = (urlparse(url).hostname or "").lower()
     return host[4:] if host.startswith("www.") else host
@@ -60,7 +84,7 @@ def trust_level(url: str, extra_domains: list[str] | None = None) -> str | None:
     if not host:
         return None
     if (_matches(host, PRIMARY_DOMAINS) or host.endswith(INSTITUTIONAL_SUFFIXES)
-            or host.startswith(NEWSROOM_PREFIXES)):
+            or (host.startswith(NEWSROOM_PREFIXES) and host not in NOT_NEWSROOMS)):
         return "primary"
     if _matches(host, PRESS_DOMAINS + list(extra_domains or [])):
         return "press"
@@ -70,6 +94,8 @@ def trust_level(url: str, extra_domains: list[str] | None = None) -> str | None:
 def is_trusted(url: str, source_type: str | None = None, extra_domains: list[str] | None = None) -> bool:
     if source_type in TRUSTED_SOURCE_TYPES:
         return True
+    if is_redirect(url):
+        return False
     return trust_level(url, extra_domains) is not None
 
 

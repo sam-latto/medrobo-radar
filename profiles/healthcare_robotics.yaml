@@ -30,4 +30,3 @@ sources:                   # which source plug-ins run for this profile
   clinicaltrials:
     query: "robotic surgery OR surgical robot OR exoskeleton OR rehabilitation robot"
 watchlist: [Intuitive Surgical, Medtronic, Stryker, CMR Surgical, Moon Surgical]
-briefing_audience: "sophisticated healthcare investor"

@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens from docs/DESIGN.md. Tailwind v4 reads them from @theme, so this file is the
+ * single source (there is no tailwind.config.ts). The default palette is cleared so only these
+ * named colors exist: `bg-teal`, `text-ink-3`, `border-border-row`, ...
+ */
+@theme {
+  --color-*: initial;
+
+  /* Brand */
+  --color-teal: #1e5b72;
+  --color-teal-dark: #164557;
+  --color-teal-deeper: #123a49;
+  --color-teal-tint: #e5eef3;
+  --color-amber: #d69a2d;
+  --color-amber-tint: rgb(214 154 45 / 0.2);
+  --color-amber-text: #7a4e0a;
+
+  /* Neutrals */
+  --color-white: #ffffff;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-surface: #f6f8fa;
+  --color-surface-subtle: #fbfcfd;
+  --color-chip: #edf2f5;
+  --color-border: #e3e8ec;
+  --color-border-row: #edf1f4;
+  --color-border-input: #dae2e8;
+  --color-border-strong: #cdd7de;
+  --color-ink: #131d24;
+  --color-ink-body: #212d35;
+  --color-ink-2: #2e3b44;
+  --color-ink-3: #3a4852;
+  --color-muted: #596874;
+  --color-placeholder: #89959e;
+  --color-disabled: #a2adb5;
+
+  /* Sign-in brand panel text (on teal-dark) */
+  --color-on-dark: #cfe0e8;
+  --color-on-dark-muted: #a6c3d1;
+
+  /* Status: always paired with an icon or word */
+  --color-success: #2f7d5b;
+  --color-success-tint: rgb(47 125 91 / 0.12);
+  --color-warning: #8f5e12;
+  --color-warning-tint: rgb(143 94 18 / 0.12);
+  --color-danger: #b4413c;
+  --color-danger-tint: rgb(180 65 60 / 0.12);
+
+  /* App type scale (Geist) */
+  --text-display: 40px;
+  --text-display--line-height: 1.15;
+  --text-display--font-weight: 600;
+  --text-h1: 32px;
+  --text-h1--line-height: 1.2;
+  --text-h1--font-weight: 600;
+  --text-h1--letter-spacing: -0.02em;
+  --text-h2: 26px;
+  --text-h2--line-height: 1.25;
+  --text-h2--font-weight: 600;
+  --text-h3: 18px;
+  --text-h3--line-height: 1.35;
+  --text-h3--font-weight: 600;
+  --text-body-lg: 15px;
+  --text-body-lg--line-height: 1.55;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-small: 13px;
+  --text-small--line-height: 1.45;
+  --text-label: 12px;
+  --text-label--line-height: 1.4;
+  --text-label--font-weight: 500;
+  --text-overline: 12px;
+  --text-overline--line-height: 1.4;
+  --text-overline--font-weight: 600;
+  --text-overline--letter-spacing: 0.06em;
+
+  /* Brief scale (Newsreader) */
+  --text-brief-headline: 48px;
+  --text-brief-headline--line-height: 1.08;
+  --text-brief-deck: 21px;
+  --text-brief-deck--line-height: 1.45;
+  --text-brief-h2: 30px;
+  --text-brief-h2--line-height: 1.2;
+  --text-brief-number: 36px;
+  --text-brief-number--line-height: 1;
+  --text-brief-body: 19px;
+  --text-brief-body--line-height: 1.65;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-base: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* The one allowed shadow: menus and dialogs */
+  --shadow-menu: 0 8px 24px rgb(19 29 36 / 0.08);
+
+  /* Layout */
+  --breakpoint-desk: 760px;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: var(--font-newsreader), Georgia, serif;
+}
+
+@layer base {
+  body {
+    background: var(--color-white);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-teal);
+    outline-offset: 2px;
+  }
+
+  input[type="checkbox"] {
+    accent-color: var(--color-teal);
+  }
+
+  a {
+    color: var(--color-teal);
+  }
+  a:hover {
+    color: var(--color-teal-deeper);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}

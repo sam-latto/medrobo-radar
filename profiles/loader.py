@@ -10,6 +10,12 @@ PROFILES_DIR = Path(__file__).parent
 
 FALLBACK_EVENT_TYPE = "news"
 FALLBACK_SEGMENT = "other"
+DEFAULT_AUDIENCE = (
+    "MBA students and early-career professionals who follow this industry for recruiting, interviews "
+    "and career moves. They want to know which companies are growing, raising money and hiring, what "
+    "the big strategic moves mean for the companies involved and their competitors, and which names "
+    "are worth knowing"
+)
 
 
 def normalize_key(value: str) -> str:
@@ -36,7 +42,12 @@ class IndustryProfile(BaseModel):
     watchlist: list[str] = []
     # Extra news sites trusted for this industry, on top of sources/trusted_domains.py
     trusted_domains: list[str] = []
-    briefing_audience: str = "sophisticated industry investor"
+    # Who the brief is written for. The app's readers are MBA students (Michigan Ross first), so the
+    # default is them; a profile can still name a different reader.
+    briefing_audience: str = DEFAULT_AUDIENCE
+    # What leads the brief, most important first. Empty = DEFAULT_BRIEFING_PRIORITIES
+    # (pipeline/synthesis_agent.py); set it where an industry's news differs (e.g. consulting).
+    briefing_priorities: list[str] = []
     # Per-event-type weights for the company momentum score (defaults in pipeline/momentum.py)
     momentum_weights: dict[str, float] = {}
 

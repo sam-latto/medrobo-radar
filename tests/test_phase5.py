@@ -93,3 +93,57 @@ def test_markdown_to_email_html():
     assert "<ul" in out and "<li style=\"margin:0 0 6px;\"><strong>One.</strong> First</li>" in out
     assert '<a href="https://fda.gov/x"' in out and 'href="javascript' not in out
     assert "<ol" in out and "<strong>Acme</strong>" in out
+
+
+def test_synthesis_removes_links_not_in_the_events(monkeypatch):
+    brief = ("# Head\n\nCleared ([openFDA](https://fda.gov/k1)). Also ([Made up](https://invented.example/z)). "
+             "Earlier deal ([Reuters](https://reuters.com/old)).")
+    monkeypatch.setattr("pipeline.llm.call_tool", lambda *a, **k: {"briefing_text": brief})
+    events = [ExtractedEvent(event_type="regulatory", summary="s", source_url="https://fda.gov/k1")]
+    text, _ = synthesis_agent.run_synthesis_agent(
+        events, PROFILE, context_events=[{"date": "2026-09-01", "summary": "old", "source_url": "https://reuters.com/old"}])
+    assert "https://fda.gov/k1" in text and "https://reuters.com/old" in text
+    assert "invented.example" not in text and "Made up" not in text
+
+
+def test_synthesis_prompt_says_weekly_when_the_last_brief_is_old(monkeypatch):
+    from datetime import date, timedelta
+    prompts = []
+    monkeypatch.setattr("pipeline.llm.call_tool",
+                        lambda prompt, tool, **k: prompts.append(prompt) or {"briefing_text": "b"})
+    events = [ExtractedEvent(event_type="news", summary="s", source_url="u")]
+    synthesis_agent.run_synthesis_agent(events, PROFILE, previous_brief_date=date.today() - timedelta(days=7))
+    synthesis_agent.run_synthesis_agent(events, PROFILE, previous_brief_date=date.today() - timedelta(days=1))
+    synthesis_agent.run_synthesis_agent(events, PROFILE)
+    assert "the 7 days since the previous brief" in prompts[0] and "weekly brief" in prompts[0]
+    assert "roughly the last day" in prompts[1] and "This is a daily brief." in prompts[1]
+    assert "the first for this industry" in prompts[2]
+    assert all("notable_indices" not in p and "notable events" not in p.lower() for p in prompts)
+
+
+def test_brief_is_written_for_mba_readers_with_a_fixed_ranking(monkeypatch):
+    from profiles.loader import DEFAULT_AUDIENCE, load_profile
+    prompts = []
+    monkeypatch.setattr("pipeline.llm.call_tool",
+                        lambda prompt, tool, **k: prompts.append(prompt) or {"briefing_text": "b"})
+    events = [ExtractedEvent(event_type="news", summary="s", source_url="u")]
+    for industry in ("healthcare_robotics", "industrial_automation", "physical_ai"):
+        profile = load_profile(industry)
+        assert profile.briefing_audience == DEFAULT_AUDIENCE  # no profile keeps an investor persona
+        synthesis_agent.run_synthesis_agent(events, profile)
+    prompt = prompts[0]
+    assert "MBA students and early-career professionals" in prompt
+    assert "investor" not in prompt.lower() and "equity research" not in prompt.lower()
+    first, second = synthesis_agent.DEFAULT_BRIEFING_PRIORITIES[:2]
+    assert f"1. {first}" in prompt and f"2. {second}" in prompt
+    assert "A neat theme is not a reason to rank a smaller story above a larger one" in prompt
+
+
+def test_profile_can_set_its_own_priorities(monkeypatch):
+    prompts = []
+    monkeypatch.setattr("pipeline.llm.call_tool",
+                        lambda prompt, tool, **k: prompts.append(prompt) or {"briefing_text": "b"})
+    profile = PROFILE.model_copy(update={"briefing_priorities": ["Large client wins", "Partner moves"]})
+    synthesis_agent.run_synthesis_agent([ExtractedEvent(event_type="news", summary="s", source_url="u")], profile)
+    assert "1. Large client wins" in prompts[0] and "2. Partner moves" in prompts[0]
+    assert synthesis_agent.DEFAULT_BRIEFING_PRIORITIES[0] not in prompts[0]

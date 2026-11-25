@@ -59,6 +59,8 @@ class ExtractedEvent(BaseModel):
     funding_amount: Optional[int] = None
     regulatory_status: Optional[str] = None
     is_notable: bool = False
+    # A few sentences of the source text, for the brief writer's key items; not stored
+    excerpt: Optional[str] = None
 
     @field_validator("date", mode="before")
     @classmethod

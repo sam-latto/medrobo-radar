@@ -22,4 +22,3 @@ sources:
   arxiv:
     query: 'cat:cs.RO AND (abs:"foundation model" OR abs:humanoid OR abs:"vision-language-action")'
 watchlist: [Figure AI, Agility Robotics, Apptronik, 1X, Boston Dynamics, Tesla, Physical Intelligence, Skild AI, Unitree, Symbotic, Locus Robotics]
-briefing_audience: "deep-tech venture investor"

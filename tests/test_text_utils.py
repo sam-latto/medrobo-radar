@@ -22,3 +22,37 @@ def test_strip_index_refs():
     assert strip_index_refs("Cornerstone ($200M, index 0) and revenue (index 59/99).") == (
         "Cornerstone ($200M) and revenue."
     )
+
+
+def test_drop_unknown_links_keeps_only_collected_sources():
+    from pipeline.text_utils import drop_unknown_links
+    allowed = ["https://fda.gov/a", "https://www.reuters.com/b/"]
+    text = ("Cleared 510(k) ([openFDA](https://fda.gov/a)). Raised $10M ([Blog](https://made-up.example/x)). "
+            "Both ([Reuters](https://www.reuters.com/b); [Fake](https://nope.example)). "
+            "Read [the filing](https://fda.gov/a) and [a rumor](https://nope.example/r).")
+    cleaned, dropped = drop_unknown_links(text, allowed)
+    assert cleaned == ("Cleared 510(k) ([openFDA](https://fda.gov/a)). Raised $10M. "
+                       "Both ([Reuters](https://www.reuters.com/b)). "
+                       "Read [the filing](https://fda.gov/a) and a rumor.")
+    assert dropped == 3
+    assert drop_unknown_links("No links here.", []) == ("No links here.", 0)
+
+
+def test_redirect_and_tracking_links_are_never_trusted():
+    from sources.trusted_domains import is_redirect, is_trusted
+    rejected = [
+        "https://link.axios.com/click/47848563.156959/aHR0cHM6Ly9heGlvcy5saW5r",  # newsletter click tracker
+        "https://news.google.com/rss/articles/CBMiXmh0dHBz",                       # aggregator redirect
+        "https://www.reuters.com/r?url=https%3A%2F%2Fexample.com",                  # URL inside the URL
+        "https://t.co/abc123", "https://bit.ly/3xyz",                               # shorteners
+    ]
+    kept = [
+        "https://link.springer.com/article/10.1186/s13643-025-02974-1",  # a journal, not a tracker
+        "https://www.axios.com/2026/10/07/mecka-ai-series-b",
+        "https://news.medtronic.com/2026-10-01-hugo",                     # company newsroom
+        "https://www.reuters.com/technology/x?utm_source=newsletter",     # tracking tags alone are fine
+        "https://www.therobotreport.com/tracking-humanoid-progress/",     # "tracking" in a title
+    ]
+    assert all(is_redirect(u) and not is_trusted(u) for u in rejected)
+    assert all(not is_redirect(u) and is_trusted(u) for u in kept)
+    assert not is_trusted("https://news.ycombinator.com/item?id=1")  # looks like a newsroom, isn't one

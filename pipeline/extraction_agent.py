@@ -1,4 +1,5 @@
 import logging
+import re
 from config import EXTRACTION_BATCH_SIZE
 from config import EXTRACTION_MODEL
 from pipeline.llm import call_tools
@@ -18,7 +19,8 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
             "type": "boolean",
             "description": (
                 f"false if the result is not really about the {profile.name} industry "
-                "(off-topic article, unrelated company, generic listicle); such results are discarded"
+                "(off-topic article, unrelated company) or isn't a single announcement (roundup, "
+                "newsletter, listicle, listing page); such results are discarded"
             ),
         },
         "company": {
@@ -49,7 +51,8 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
         },
         "funding_amount": {
             "type": "integer",
-            "description": "Amount raised or deal value in USD (e.g. 50000000 for $50M), only if applicable",
+            "description": ("Amount raised or acquisition/merger price in USD (e.g. 50000000 for $50M); "
+                            "never contract, revenue or valuation figures"),
         },
         "regulatory_status": {
             "type": "string",
@@ -77,6 +80,19 @@ def build_extract_tool(profile: IndustryProfile) -> dict:
 
 
 PREFILL_FIELDS = ("company", "product", "event_type", "date", "funding_amount", "regulatory_status")
+EXCERPT_SENTENCES = 3
+EXCERPT_CHARS = 600
+
+
+def excerpt(text: str | None) -> str | None:
+    """The first few sentences of a result's text, so the brief writer can ground its analysis
+    of the biggest stories in the source and not only in a one-line summary."""
+    words = " ".join((text or "").split())
+    if not words:
+        return None
+    sentences = re.split(r"(?<=[.!?])\s+", words)
+    short = " ".join(sentences[:EXCERPT_SENTENCES])
+    return short if len(short) <= EXCERPT_CHARS else short[:EXCERPT_CHARS].rsplit(" ", 1)[0] + "…"
 
 
 def _format_result(result_id: int, result: RawResult) -> str:
@@ -114,6 +130,11 @@ def _extract_request(batch: list[RawResult], profile: IndustryProfile) -> dict:
 
 Extract one structured event per result. Where a result lists authoritative facts from a primary source (FDA, SEC, research databases), keep those facts exactly; classify its segment and write the summary from them. Mark results that are not really about this industry as relevant=false.
 
+Rules:
+- funding_amount is only money raised (equity rounds, grants, debt) or the price of an acquisition or merger. Customer contracts, bookings, revenue, orders, valuations and market-size estimates are not funding: leave funding_amount empty and don't use the funding event type for them.
+- Each event is one announcement. Mark roundups, newsletters, "top 10" lists, index or listing pages, event calendars and job posts as relevant=false: they summarize many stories instead of reporting one.
+- When several results report the same announcement, record each, using the same company name, amount and date in all of them.
+
 {results_text}
 
 Call the record_events tool with one entry per result, using its [id] as result_id."""
@@ -145,6 +166,7 @@ def _parse_events(data: dict, batch: list[RawResult], profile: IndustryProfile) 
 
     events: list[ExtractedEvent] = []
     for result, item in items:
+        item["excerpt"] = excerpt(result.snippet)
         item["source_url"] = result.url
         item["source_type"] = result.source_type
         item["industry_id"] = profile.id
