@@ -16,7 +16,9 @@
     {
       "name": "api",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--reload", "--port", "8000"],
+      "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--reload", "--port", "8000",
+                      "--reload-dir", "api", "--reload-dir", "pipeline", "--reload-dir", "jobs",
+                      "--reload-dir", "database", "--reload-dir", "sources", "--reload-dir", "profiles"],
       "port": 8000
     }
   ]
