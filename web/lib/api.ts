@@ -160,3 +160,38 @@ export type Brief = {
 
 export type FilterOption = { value: string; count: number };
 export type EventFilterOptions = { types: FilterOption[]; segments: FilterOption[] };
+
+export type CompanyItem = {
+  company_id: number;
+  company: string;
+  rank: number;
+  score: number;
+  events_90d: number;
+  funding_90d: number;
+  regulatory_90d: number;
+  last_event: string | null;
+  key_company: boolean;
+  watching: boolean;
+  description: string | null;
+  website: string | null;
+  latest_summary: string | null;
+};
+
+export type CompanyEvent = Omit<EventItem, "company" | "company_id" | "watching" | "matches_focus">;
+
+export type CompanyProfile = {
+  id: number;
+  name: string;
+  description: string | null;
+  website: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  industries: { id: string; name: string }[];
+  watching: boolean;
+  events: CompanyEvent[];
+  filings: CompanyEvent[];
+  trials: CompanyEvent[];
+  research: CompanyEvent[];
+  hiring: { open_roles: number; postings: { id: number; title: string; location: string | null; url: string }[] };
+  similar: { id: number; name: string; description: string | null; events_90d: number; watching: boolean }[];
+};

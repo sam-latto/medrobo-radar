@@ -295,7 +295,7 @@ export function EventsView() {
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-lg border border-border">
+          <div className="relative overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-[820px] border-collapse text-body">
               <caption className="sr-only">Events for {industryName}</caption>
               <thead>
