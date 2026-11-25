@@ -4,6 +4,7 @@ email opted-in users, and keep spend within the monthly budget.
 Usage:  python -m worker.run_daily                      # the scheduled run
         python -m worker.run_daily --dry-run            # list what would run, change nothing
         python -m worker.run_daily --industry physical_ai --force --no-email --no-jobs
+        python -m worker.run_daily --describe-companies  # only fill missing company descriptions
 """
 import argparse
 import logging
@@ -26,6 +27,7 @@ from email_digest import sender
 from jobs import functions
 from jobs.collector import collect_jobs
 from pipeline import pipeline
+from pipeline.company_descriptions import describe_companies
 from pipeline.llm import batch_mode, usage_sink
 from profiles.loader import parse_profile
 
@@ -135,6 +137,18 @@ def refresh_jobs(conn, industry: dict) -> dict:
     with use_store(PgStore(conn)):
         stats, cost = _with_usage(conn, industry["id"], lambda: collect_jobs(profile, role_types))
     return {**stats, "role_types": len(role_types), "cost_usd": cost}
+
+
+def describe(conn, industry: dict) -> dict:
+    """Fill missing "what they do" descriptions for the industry's companies (cheap, Haiku).
+    Never raises: a failure is logged and the companies are tried again next run."""
+    try:
+        written, cost = _with_usage(conn, industry["id"],
+                                    lambda: describe_companies(conn, industry["id"], industry["name"]))
+        return {"written": written, "cost_usd": cost}
+    except Exception as e:
+        logger.exception(f"[{industry['id']}] company descriptions failed")
+        return {"error": type(e).__name__, "cost_usd": 0.0}
 
 
 @contextmanager
@@ -267,6 +281,8 @@ def run(conn, only: list[str] | None = None, force: bool = False, send_email: bo
                 first_cost = result["cost_usd"]
                 result = run_industry(conn, industry, run_date, force=True)
                 result["cost_usd"] = round(result["cost_usd"] + first_cost, 6)
+            if result["status"] != "failed" and not budget["paused"]:
+                result["descriptions"] = describe(conn, industry)
             if jobs and result["status"] != "failed":
                 try:
                     result["jobs"] = refresh_jobs(conn, industry)
@@ -289,7 +305,8 @@ def run(conn, only: list[str] | None = None, force: bool = False, send_email: bo
                         "cost_usd": r["cost_usd"], "jobs": r.get("jobs")} for r in results],
         "failed": [f[0] for f in failures],
         "emails_sent": emailed,
-        "cost_usd": round(sum(r["cost_usd"] + (r.get("jobs") or {}).get("cost_usd", 0) for r in results), 4),
+        "cost_usd": round(sum(r["cost_usd"] + (r.get("jobs") or {}).get("cost_usd", 0)
+                              + (r.get("descriptions") or {}).get("cost_usd", 0) for r in results), 4),
         "budget": check_budget(conn),
     }
     logger.info(f"Daily run summary: {summary}")
@@ -309,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-email", action="store_true", help="don't email users")
     parser.add_argument("--no-jobs", action="store_true", help="don't refresh job postings")
     parser.add_argument("--dry-run", action="store_true", help="list what would run and the budget; change nothing")
+    parser.add_argument("--describe-companies", action="store_true",
+                        help="only fill missing company descriptions for active industries (no pipeline run)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -321,6 +340,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Would run: {', '.join(i['id'] for i in industries) or 'nothing (no followed industries due today)'}")
             print(f"Claude calls via Message Batches (half price): {'yes' if USE_BATCH_API else 'no'}")
             print(f"Spent this month: ${spent:,.2f} of ${MONTHLY_BUDGET_USD:,.0f}")
+            return 0
+        if args.describe_companies:
+            if check_budget(conn)["paused"]:
+                print("Budget reached: not writing descriptions")
+                return 1
+            for industry in industries_to_run(conn, args.industry or None) or []:
+                print(f"{industry['id']}: {describe(conn, industry)}")
             return 0
         summary = run(conn, args.industry, args.force, not args.no_email, not args.no_jobs)
     return 1 if summary["failed"] and len(summary["failed"]) == len(summary["industries"]) else 0
