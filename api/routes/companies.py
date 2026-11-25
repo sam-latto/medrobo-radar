@@ -28,11 +28,17 @@ def ranked_companies(conn, industry_id: str, as_of: date | None = None) -> list[
         return [{"company_id": c["id"], "company": c["name"], "watchlist": False, "score": 0, "events_90d": 0,
                  "funding_90d": 0, "regulatory_90d": 0, "last_event": None, "rank": i}
                 for i, c in enumerate(sorted(companies, key=lambda c: c["name"].lower()), 1)]
+    # "Today" here is local but the database dates collection in UTC, which can already be
+    # tomorrow in the US evening: for the default window, end at whichever is later
+    upper = "%s::date" if as_of else "greatest(%s::date, current_date)"
     as_of = as_of or date.today()
     events = conn.execute(
-        """select id, company_id, event_type, funding_amount, product, regulatory_status, date
+        # Undated events count by when they were collected, as on the Event tracker
+        f"""select id, company_id, event_type, funding_amount, product, regulatory_status,
+                  coalesce(date, created_at::date) as date
            from public.events
-           where industry_id = %s and company_id is not null and date between %s and %s""",
+           where industry_id = %s and company_id is not null
+             and coalesce(date, created_at::date) between %s and {upper}""",
         (industry_id, as_of - timedelta(days=momentum.WINDOW_DAYS), as_of)).fetchall()
     for e in events:  # momentum's dedup keys expect ISO date strings
         e["date"] = e["date"].isoformat() if e["date"] else None
@@ -50,6 +56,11 @@ def list_companies(industry_id: str, q: str | None = None, watching: bool = Fals
             (industry_id,))}
         watched = {r["company_id"] for r in conn.execute(
             "select company_id from public.watchlist where user_id = %s", (user.id,))}
+        # Shown in place of "what they do" while a company has no description yet
+        latest = {r["company_id"]: r["summary"] for r in conn.execute(
+            """select distinct on (company_id) company_id, summary from public.events
+               where industry_id = %s and company_id is not null and summary is not null
+               order by company_id, coalesce(date, created_at::date) desc, id desc""", (industry_id,))}
     items = []
     needle = (q or "").strip().lower()
     for r in ranking:
@@ -60,7 +71,8 @@ def list_companies(industry_id: str, q: str | None = None, watching: bool = Fals
         extra = info.get(r["company_id"], {})
         key_company = r.pop("watchlist")  # on the industry's list of key companies
         items.append({**r, "key_company": key_company, "watching": r["company_id"] in watched,
-                      "description": extra.get("description"), "website": extra.get("website")})
+                      "description": extra.get("description"), "website": extra.get("website"),
+                      "latest_summary": latest.get(r["company_id"])})
     return {"items": items, "total": len(items)}
 
 
@@ -87,12 +99,14 @@ def get_company(company_id: int, user: CurrentUser = Depends(current_user), conn
                     peers as (select distinct ci.company_id from public.company_industries ci
                               join mine using (industry_id) where ci.company_id <> %(id)s)
                select c.id, c.name, c.description,
+                      exists (select 1 from public.watchlist w
+                              where w.user_id = %(user)s and w.company_id = c.id) as watching,
                       (select count(*) from public.events e
                        where e.company_id = c.id and e.industry_id in (select industry_id from mine)
                          and e.date between current_date - %(days)s and current_date) as events_90d
                from peers join public.companies c on c.id = peers.company_id
                order by events_90d desc, c.name limit 5""",
-            {"id": company_id, "days": momentum.WINDOW_DAYS}).fetchall()
+            {"id": company_id, "days": momentum.WINDOW_DAYS, "user": user.id}).fetchall()
         hiring = conn.execute(
             """select id, title, location, url, posted_at from public.job_postings
                where active and lower(company) = lower(%s) order by first_seen_at desc limit 10""",

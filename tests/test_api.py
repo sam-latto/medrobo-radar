@@ -594,3 +594,22 @@ def test_undated_events_are_filtered_by_when_they_were_collected(env):
     outside = c.get("/api/v1/events", headers=auth(user), params={**params, "from": "2026-10-01"})
     assert [e["date"] for e in inside.json()["items"]] == [None]  # shown, still marked as undated
     assert outside.json()["total"] == 0
+
+
+def test_company_ranking_counts_undated_events_and_similar_shows_watching(env):
+    c, user, conn = env["client"], env["new_user"](), env["conn"]
+    params = {"industry_id": "healthcare_robotics"}
+    before = {i["company_id"]: i for i in c.get("/api/v1/companies", headers=auth(user), params=params).json()["items"]}
+    target, peer = list(before)[:2]
+    run = conn.execute("select id from public.pipeline_runs where industry_id = 'healthcare_robotics' limit 1").fetchone()
+    conn.execute("insert into public.events (run_id, industry_id, company_id, company, event_type, segment, summary, "
+                 "source_url, source_type) values (%s, 'healthcare_robotics', %s, 'x', 'news', 'other', "
+                 "'Undated news', 'https://www.therobotreport.com/undated-ranking-test', 'tavily')", (run["id"], target))
+    after = {i["company_id"]: i for i in c.get("/api/v1/companies", headers=auth(user), params=params).json()["items"]}
+    assert after[target]["events_90d"] == before[target]["events_90d"] + 1  # counted by collection date
+    assert after[target]["latest_summary"] == "Undated news"  # shown while there's no description
+
+    assert c.put(f"/api/v1/watchlist/{peer}", headers=auth(user)).status_code == 204
+    similar = c.get(f"/api/v1/companies/{target}", headers=auth(user)).json()["similar"]
+    assert similar and all(isinstance(s["watching"], bool) for s in similar)
+    assert all(s["watching"] == (s["id"] == peer) for s in similar)

@@ -99,6 +99,8 @@ def fake_pipeline(monkeypatch, fail=False):
                           "cost_usd": 0.25})
         return "# Humanoid makers raise again\n\nBody of the brief.", []
     monkeypatch.setattr(pipeline, "run_synthesis_agent", synthesis)
+    # The description step would call Claude: never reach the network from these tests
+    monkeypatch.setattr(run_daily, "describe_companies", lambda conn, industry_id, name, limit=0: 0)
     monkeypatch.setattr(pipeline_companies, "call_tool", lambda *a, **k: {"matches": []})
     return url
 
@@ -131,7 +133,7 @@ def test_daily_run_writes_events_brief_cost_and_emails(conn, monkeypatch, mail):
                        (event["run_id"],)).fetchone()
     assert run["status"] == "complete" and float(run["cost_usd"]) == 0.25
     usage = conn.execute("select action, industry_id, user_id from public.usage_events where industry_id = "
-                         "'physical_ai'").fetchall()
+                         "'physical_ai' and created_at >= date_trunc('month', now())").fetchall()
     assert usage == [{"action": "llm:submit_briefing", "industry_id": "physical_ai", "user_id": None}]
     assert summary["emails_sent"] == 1
     assert [m["to"] for m in mail] == [email] and "Humanoid makers raise again" in mail[0]["body"]
