@@ -401,7 +401,7 @@ The local SQLite app keeps working until the new app is live, so nothing is lost
 
 | Item | Estimate |
 |---|---|
-| Supabase Pro | $25 |
+| Supabase (free during the beta, Pro once a trigger in PRD 5.16 is hit) | $0–25 |
 | Render (API web service + cron worker) | ~$15–25 |
 | Vercel (Hobby, or Pro at $20 if needed) | $0–20 |
 | Sentry, SendGrid (free tiers) | $0 |

@@ -301,6 +301,18 @@ v3 turns it into an **always-on web app that other people can sign into**:
 
 **In one sentence:** I kept the date and cut scope to the part that's ready, putting the riskiest and costliest feature behind a short second release.
 
+### 5.16 Start production on Supabase's free plan
+
+**Decision:** production runs on the free Supabase plan during the beta and early launch, with a weekly database backup I run myself. Upgrade to Pro ($25/month) when any trigger below is hit.
+
+**Why:** the beta is 10–15 users and the database is well under the free limits, so $25/month buys little yet. The free plan's pause-after-a-week-idle doesn't apply in practice, because the nightly worker uses the database every day (the dev project paused only because nothing ran for six weeks).
+
+**What it gives up:** automatic daily backups (covered by a weekly `pg_dump` kept outside Supabase), and headroom (500 MB database, 1 GB file storage, 2 active projects).
+
+**Upgrade to Pro when:** the full Ross launch opens; or the database passes 400 MB or file storage 800 MB; or students' resumes are stored (Jobs release), since that data deserves daily backups; or a pause or outage ever happens in production.
+
+**In one sentence:** I don't pay for capacity before there's usage, but I wrote down exactly when the cheap option stops being good enough.
+
 ---
 
 ## 6. New repo structure
