@@ -1,7 +1,9 @@
-import { ComingSoon } from "@/components/coming-soon";
+"use client";
 
-export const metadata = { title: "Event tracker · Industry Radar" };
+import { useSession } from "@/components/app-shell";
+import { EventsView } from "./events-view";
 
-export default function Page() {
-  return <ComingSoon title="Event tracker" description="Every event collected for this industry, with its source link, is coming next." />;
+export default function EventsPage() {
+  const { industryId } = useSession();
+  return <EventsView key={industryId} />;
 }

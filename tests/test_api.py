@@ -217,6 +217,21 @@ def test_events_filters_paging_and_csv(env):
     assert len(csv.text.splitlines()) == page["total"] + 1
 
 
+def test_event_filter_options_list_what_exists(env):
+    c, user = env["client"], env["new_user"]()
+    options = c.get("/api/v1/events/filters", headers=auth(user),
+                    params={"industry_id": "healthcare_robotics"}).json()
+    total = c.get("/api/v1/events", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()["total"]
+    assert options["types"] and sum(t["count"] for t in options["types"]) == total
+    assert [t["count"] for t in options["types"]] == sorted((t["count"] for t in options["types"]), reverse=True)
+    research = next(t for t in options["types"] if t["value"] == "research")
+    filtered = c.get("/api/v1/events", headers=auth(user),
+                     params={"industry_id": "healthcare_robotics", "type": "research"}).json()["total"]
+    assert research["count"] == filtered
+    assert options["segments"] and all(s["value"] for s in options["segments"])
+    assert c.get("/api/v1/events/filters", params={"industry_id": "healthcare_robotics"}).status_code == 401
+
+
 def test_companies_ranking_profile_and_watchlist(env):
     c, user = env["client"], env["new_user"]()
     companies = c.get("/api/v1/companies", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()

@@ -104,6 +104,19 @@ def list_events(industry_id: str | None = None, type: str | None = None, segment
     return {"items": _with_source(rows), "total": total, "page": page, "page_size": page_size}
 
 
+@router.get("/events/filters")
+def event_filter_options(industry_id: str, user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
+    """The event types and segments that actually occur in an industry, with counts, for the
+    Event tracker's dropdowns (so a filter never offers an option with no events)."""
+    with as_user(conn, user.id):
+        def counts(column: str) -> list[dict]:
+            return conn.execute(
+                f"select {column} as value, count(*) as count from public.events "
+                f"where industry_id = %s and {column} is not null group by {column} order by count(*) desc, {column}",
+                (industry_id,)).fetchall()
+        return {"types": counts("event_type"), "segments": counts("segment")}
+
+
 @router.get("/events.csv")
 def export_events(industry_id: str | None = None, type: str | None = None, segment: str | None = None,
                   date_from: date | None = Query(default=None, alias="from"),
