@@ -1,9 +1,11 @@
-"use client";
+import { EventsScreen } from "./events-page";
 
-import { useSession } from "@/components/app-shell";
-import { EventsView } from "./events-view";
+export const metadata = { title: "Event tracker · Industry Radar" };
 
-export default function EventsPage() {
-  const { industryId } = useSession();
-  return <EventsView key={industryId} />;
+// Everything on this page loads in the browser from the API after sign-in, so there is
+// nothing to prerender for instant navigation; opt out of that dev-time check.
+export const instant = false;
+
+export default function Page() {
+  return <EventsScreen />;
 }

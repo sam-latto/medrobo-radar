@@ -49,11 +49,14 @@ def event_filters(user_id, industry_id: str | None, event_type: str | None, segm
     if segment:
         clauses.append("e.segment = %(segment)s")
         params["segment"] = segment
+    # About half of web results have no date; filter those by when they were collected, so a
+    # date range (including the default "last 90 days") doesn't silently hide them
+    when = "coalesce(e.date, e.created_at::date)"
     if date_from:
-        clauses.append("e.date >= %(from)s")
+        clauses.append(f"{when} >= %(from)s")
         params["from"] = date_from
     if date_to:
-        clauses.append("e.date <= %(to)s")
+        clauses.append(f"{when} <= %(to)s")
         params["to"] = date_to
     if q and q.strip():
         clauses.append("(e.summary ilike %(q)s or e.company ilike %(q)s or e.product ilike %(q)s)")
@@ -105,15 +108,19 @@ def list_events(industry_id: str | None = None, type: str | None = None, segment
 
 
 @router.get("/events/filters")
-def event_filter_options(industry_id: str, user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
-    """The event types and segments that actually occur in an industry, with counts, for the
-    Event tracker's dropdowns (so a filter never offers an option with no events)."""
+def event_filter_options(industry_id: str, date_from: date | None = Query(default=None, alias="from"),
+                         date_to: date | None = Query(default=None, alias="to"),
+                         user: CurrentUser = Depends(current_user), conn=Depends(get_conn)):
+    """The event types and segments that occur in an industry (within the date range, when
+    given), with counts, for the Event tracker's dropdowns: a filter never offers an option
+    with no events, and its count matches what the list shows for that range."""
+    where, params = event_filters(user.id, industry_id, None, None, date_from, date_to, None)
     with as_user(conn, user.id):
         def counts(column: str) -> list[dict]:
             return conn.execute(
-                f"select {column} as value, count(*) as count from public.events "
-                f"where industry_id = %s and {column} is not null group by {column} order by count(*) desc, {column}",
-                (industry_id,)).fetchall()
+                f"select e.{column} as value, count(*) as count from public.events e "
+                f"where {where} and e.{column} is not null group by e.{column} order by count(*) desc, e.{column}",
+                params).fetchall()
         return {"types": counts("event_type"), "segments": counts("segment")}
 
 

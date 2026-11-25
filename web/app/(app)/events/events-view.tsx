@@ -63,13 +63,17 @@ export function EventsView() {
     return p;
   }, [industryId, filters]);
 
+  // Dropdown counts follow the date range, so "Research (12)" means 12 rows when picked
   useEffect(() => {
     const ctrl = new AbortController();
-    api<EventFilterOptions>(`/events/filters?industry_id=${encodeURIComponent(industryId)}`, { signal: ctrl.signal })
+    const p = new URLSearchParams({ industry_id: industryId });
+    if (filters.from) p.set("from", filters.from);
+    if (filters.to) p.set("to", filters.to);
+    api<EventFilterOptions>(`/events/filters?${p}`, { signal: ctrl.signal })
       .then(setOptions)
       .catch(() => {}); // the dropdowns just stay at "All"
     return () => ctrl.abort();
-  }, [industryId]);
+  }, [industryId, filters.from, filters.to]);
 
   useEffect(() => {
     const q = search.trim();
