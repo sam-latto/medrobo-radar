@@ -1,17 +1,24 @@
 # Product Requirements Document — v3
 # Industry Radar: from a local tool to a hosted web app
 
-**Version:** 3.0
-**Status:** Architecture agreed, ready to plan the build
+**Version:** 3.1
+**Status:** Building. Phases A–D done, E in progress; staged launch from December 1, 2026 (section 10)
 **Author:** Sam
-**Last Updated:** October 2026
+**Last Updated:** November 2026
 **Builds on:** `docs/PRD.md` (v1) and `docs/PRD_v2.md` (v2). The pipeline, sources, briefing and Jobs logic from v2 stay; this doc changes where they run, how they're stored and how people reach them.
+
+**What changed in v3.1 (November 2026)**
+- **Launch re-planned** (section 10): a staged launch. December 1 is a beta of Briefing, Events and Companies (with Consulting, PE and VC profiles); Jobs follows about two weeks later.
+- **Product outcome metrics** added next to the engineering ones (section 9), with the instrumentation they need.
+- **User stories and acceptance criteria** for every screen (section 11), and a **launch plan** with beta exit criteria (section 12).
+- **Decisions made while building** recorded in section 5 (5.10–5.15): who the brief is written for, how it ranks stories, the model mix, link and duplicate rules, and the industry tabs.
+- **Work tracking:** remaining work lives as GitHub issues under the *Ross launch* milestone; every change ships as a reviewed pull request.
 
 ---
 
 ## 0. How to use this doc
 
-Sections 1–3 say what v3 is and who it's for. Section 4 is the architecture. Section 5 records each major decision with the reasoning, the alternatives considered and the trade-offs. Section 6 is the new repo structure, section 7 the data model, section 8 the build phases.
+Sections 1–3 say what v3 is and who it's for. Section 4 is the architecture. Section 5 records each major decision with the reasoning, the alternatives considered and the trade-offs. Section 6 is the new repo structure, section 7 the data model, section 8 the build phases. Section 9 is how success is measured, section 10 the launch decisions, section 11 the user stories with acceptance criteria, and section 12 the launch plan.
 
 Section 5 is written to be explainable out loud: each decision ends with a short "In one sentence" summary.
 
@@ -223,6 +230,77 @@ v3 turns it into an **always-on web app that other people can sign into**:
 
 **In one sentence:** I traded volume for trust: fewer events, but every one links to a source you can verify.
 
+### Decisions made while building (October–November 2026)
+
+### 5.10 Write the brief for MBA readers, not investors
+
+**Decision:** the brief is written for "MBA students and early-career professionals who follow this industry for recruiting, interviews and career moves", in the style of a business newspaper's industry coverage or a consulting firm's update. Jargon gets a short explanation.
+
+**Why:** the brief's persona came from the single-user version, where each industry was written for a different investor ("deep-tech venture investor"). The first real brief read like a venture pitch ("the main investable battleground") and led with a neat thesis instead of the week's biggest news. The actual readers want to know who is growing, raising and hiring, and what big moves mean for the companies and people involved.
+
+**Alternatives considered:**
+- *Keep investor personas:* sharper financial analysis, but the wrong reader.
+- *A blend (MBA reader who thinks like an investor):* tempting, but it pulls the voice back toward pitch language.
+- *Personalize per user:* the brief is shared, so per-user rewriting would multiply cost (see 5.5).
+
+**Trade-off:** less depth on valuation and deal terms. Investor-minded readers (PE and VC recruiting) still get the money facts, because deals rank first (5.11).
+
+**In one sentence:** I wrote for the readers I actually have, not the persona the prototype was built for.
+
+### 5.11 An explicit ranking decides what leads the brief
+
+**Decision:** the brief ranks news in a fixed order: (1) large funding, M&A and regulatory approvals, (2) commercial traction such as big customers, deployments and hiring, (3) launches and new entrants, (4) leadership and strategy changes, (5) research only when decisive. Within a category, bigger and more concrete wins. Each industry profile can replace the order (`briefing_priorities`), because Consulting news looks nothing like FDA news. The writer is also handed the run's largest deals and regulatory actions, and a warning is logged if the brief skips one.
+
+**Why:** the first brief left out the biggest round of the week ($152M) because the model optimized for a tidy theme. "Most important" was never defined, so the model defined it.
+
+**Alternatives considered:** *leave it to model judgment* (cheapest, but inconsistent across industries); *have Claude revise briefs that miss a key item* (~$0.04 per run; held back until the warnings show it's needed).
+
+**Trade-off:** a fixed order can feel formulaic on slow days. Accepted for consistency, which readers notice more.
+
+**In one sentence:** I turned "pick what matters" from a model's judgment call into a stated, adjustable product rule.
+
+### 5.12 Model mix: Haiku for extraction, Sonnet for writing
+
+**Decision:** event extraction and company matching use Claude Haiku 5.5; the brief, job scoring and resume tailoring use Claude Sonnet 5.5. The nightly run uses the Message Batches API (50% off).
+
+**Why:** extraction is high-volume, structured work; writing and judging fit is where quality shows. The first paid run cost $0.44 for one industry: search was 87% of that, the brief about 11%, and Haiku extraction under 2%. Sonnet 5.5 replaced 4.6 at a lower price ($2/$10 vs $3/$15 per million tokens).
+
+**Trade-off:** Haiku made more mistakes (duplicates, a customer contract recorded as funding), so it needed guardrails (5.13) rather than a pricier model.
+
+**In one sentence:** I spent on the model where quality is visible and fixed the cheap model's mistakes with rules instead of money.
+
+### 5.13 Data hygiene: merge duplicates, reject redirect links, never guess dates
+
+**Decision:**
+- The same story from several outlets becomes one event, keeping the most authoritative source.
+- Customer contracts, revenue and valuations are never recorded as funding; roundups and listing pages aren't events.
+- Links that redirect (newsletter click trackers, shorteners, news aggregators) are never accepted as sources, even on trusted sites. Every link in a brief must be one of the collected sources, or it's removed.
+- The writer never guesses a missing date, and it gets the opening of the source text for the biggest stories.
+
+**Why:** the first real run had the same round counted up to three times, a $70M customer contract shown as a $70M raise, a newsletter tracking link as a "source", and a wrong date. Each one undermines "every claim is checkable" (5.9).
+
+**In one sentence:** trust is the product, so I treated each data error from the first run as a rule to enforce, not a one-off to patch.
+
+### 5.14 Industry tabs instead of a sidebar dropdown
+
+**Decision:** the industry switcher is a row of tabs at the top of Briefing, Events and Companies, not a dropdown in the sidebar.
+
+**Why:** in my review of the first build, switching industries from the sidebar felt disconnected from the page it changed, and it took two clicks. Tabs show every followed industry at once and change the page in one click.
+
+**Trade-off:** the row needs to scroll sideways for people following many industries. Acceptable at launch, where most follow two to four.
+
+**In one sentence:** I put the control next to what it changes.
+
+### 5.15 Staged launch instead of everything on December 1
+
+**Decision:** see section 10. Briefing, Events and Companies launch to a beta group on December 1; Jobs follows about two weeks later.
+
+**Why:** with a week left, Events, Companies, Jobs and deployment were still open. Jobs is the largest remaining piece, the main cost driver, and the only feature handling private documents (resumes), so it carries the most risk.
+
+**Alternatives considered:** *slip the whole launch* (complete, but loses the moment and runs into exams and break); *everything on December 1* (highest risk of a broken first impression).
+
+**In one sentence:** I kept the date and cut scope to the part that's ready, putting the riskiest and costliest feature behind a short second release.
+
 ---
 
 ## 6. New repo structure
@@ -300,32 +378,55 @@ medrobo-radar/
 
 Each phase leaves something working and is committed separately.
 
-| Phase | What | Done when |
-|---|---|---|
-| A | Architecture notes, migration plan, design system | `docs/ARCHITECTURE.md` and `docs/DESIGN.md` written and approved |
-| B | Supabase project, migrations, data copied from SQLite | Existing events, companies and briefs readable in Postgres |
-| C | FastAPI over the existing code | Briefs, events, companies and Jobs work via the API, with tests |
-| D | Worker | Daily run writes events and briefs for followed industries |
-| E | Next.js front end | All redesign screens work against the API |
-| F | Google sign-in, RLS, limits, metering | Two test users can't see each other's data; limits enforced |
-| G | Deploy (Vercel, Render, Supabase prod), Sentry, spend caps | Live URL, errors reported, caps set |
-| H | Ross launch | First users onboarded |
+| Phase | What | Done when | Status (Nov 24) |
+|---|---|---|---|
+| A | Architecture notes, migration plan, design system | `docs/ARCHITECTURE.md` and `docs/DESIGN.md` written and approved | Done |
+| B | Supabase project, migrations, data copied from SQLite | Existing events, companies and briefs readable in Postgres | Done |
+| C | FastAPI over the existing code | Briefs, events, companies and Jobs work via the API, with tests | Done |
+| D | Worker | Daily run writes events and briefs for followed industries | Done, plus a multi-agent code review and its fixes |
+| E | Next.js front end | All redesign screens work against the API | In progress: sign-in, Choose industries, Briefing done; Events, Companies, Jobs open |
+| F | Google sign-in, RLS, limits, metering | Two test users can't see each other's data; limits enforced | Done (sign-in moved into E; a real umich sign-in verified) |
+| G | Deploy (Vercel, Render, Supabase prod), Sentry, spend caps | Live URL, errors reported, caps set | Not started |
+| H | Ross launch | First users onboarded | Staged: beta Dec 1, see section 12 |
+
+Every phase ships as a pull request into the previous one (A into `main`, B into A, and so on) with a description of the problem, the change and how it was tested. Remaining work is tracked as GitHub issues under the *Ross launch* milestone.
 
 ---
 
 ## 9. Success metrics
 
+### Product outcomes (is it useful?)
+
+The targets are starting hypotheses for a few hundred Ross users. The beta (section 12) sets the baseline, and the targets are revisited after four weeks.
+
+| Metric | Definition | Target |
+|---|---|---|
+| **Reach** | Ross accounts created | 100 in the first month after the full launch |
+| **Activation** | New users who follow at least one industry *and* open a brief within 7 days of signing up | ≥ 60% |
+| **Weekly active readers** | Signed-up users who open a brief or the event tracker in a given week | ≥ 40% by week 4 |
+| **Week-4 retention** | Users active in their 4th week after signing up | ≥ 30% |
+| **Brief usefulness** | Share of "Was this brief useful?" answers that are yes | ≥ 70% |
+| **Jobs adoption** (after Jobs ships) | Weekly active users who run Find jobs at least once | ≥ 25% |
+| **Cost per active user** | Monthly spend ÷ monthly active users | ≤ $1.50 |
+
+**North star:** weekly active readers. A brief people come back to every week is the core value; everything else (Companies, Jobs) builds on that habit.
+
+**How it's measured:** a small `analytics_events` table written by the API (sign-up, industries chosen, brief opened, events opened, find jobs, tailor), plus a one-tap usefulness question under each brief. No third-party tracking: the data stays in our database and is covered by export and delete. (Backlog: "Product analytics".)
+
+### Quality and cost guardrails (is it safe and affordable?)
+
 | Metric | Target |
 |---|---|
 | Brief and event pages load | < 2 seconds |
 | Users who can read another user's private data | 0 (tested with RLS tests) |
+| Links in a brief that aren't one of the collected sources | 0 (enforced in code) |
 | Uptime | Site reachable without my laptop on |
 | Monthly cost at launch | ≤ $300 |
 | Cost visibility | Every Claude and search call recorded with its cost |
 
 ---
 
-## 10. Launch decisions (October 2026)
+## 10. Launch decisions (October 2026, revised November 2026)
 
 | Decision | Choice | Why |
 |---|---|---|
@@ -336,6 +437,112 @@ Each phase leaves something working and is committed separately.
 | Daily email | Opt-in, off by default | Avoids spamming classmates and keeps email cost at zero until people ask for it |
 | Chat agent | Left out of the first release | Focus the launch on the brief, events, companies and Jobs; add chat once the core is solid |
 | Budget | ~$300/month | Covers hosting plus Claude and search within the usage limits |
-| Launch date | December 1, 2026 | |
+| Launch date | ~~December 1, 2026, everything~~ **Revised Nov 24:** staged. Dec 1: beta of Briefing, Events and Companies (incl. Consulting, PE, VC) for 10–15 students. Full Ross launch when the beta exit criteria are met. Jobs about two weeks after Dec 1 | One week out, Events, Companies, Jobs and deployment were still open. Jobs is the biggest, costliest and only resume-handling piece, so it ships second (5.15) |
+| Brief audience | **Added Nov:** MBA readers, fixed story ranking | 5.10, 5.11 |
+| Models | **Added Nov:** Haiku 5.5 for extraction, Sonnet 5.5 for writing and Jobs | 5.12 |
 
 Details of how these are enforced are in `docs/ARCHITECTURE.md`. The look and component rules are in `docs/DESIGN.md`.
+
+---
+
+## 11. User stories and acceptance criteria
+
+Each story is one GitHub issue under the *Ross launch* milestone. "Done" means every criterion below is met, it works at 375px wide, it follows `docs/DESIGN.md`, it has empty, loading and error states, and it's covered by tests where there's logic. Release: **Beta** = December 1, **Jobs** = second release.
+
+### 11.1 Sign in and onboarding (Beta, done)
+**As a** Ross student, **I want to** sign in with my school Google account and pick the industries I follow, **so that** I only see what's relevant to my recruiting.
+- [x] "Continue with Google" signs in with a `@umich.edu` account; any other account sees "open to University of Michigan accounts only" and gets no account.
+- [x] A first-time user lands on "Which industries do you follow?" and can't continue with nothing selected.
+- [x] Choosing a sector follows all its industries; search filters the list; at most 25 industries.
+- [x] Typing an unlisted area ("Surgical robotics") either adds it as a focus of an existing industry or sends it for review, and says which.
+- [x] Industries without an active brief say "Briefs start soon".
+- [x] The private-data promise is shown on the sign-in page.
+
+### 11.2 Briefing (Beta, done)
+**As a** student preparing for interviews, **I want** a short research brief for each industry I follow, **so that** I can speak to what changed and why it matters.
+- [x] One tab per followed industry switches the brief in one click.
+- [x] The brief shows headline, dek, "The bottom line", "By the numbers", themed sections, "Why it matters" and "What to watch"; older briefs still read cleanly.
+- [x] Every source is a numbered superscript linking to a source list; links open in a new tab.
+- [x] A date picker shows past briefs; PDF prints the brief without the app chrome.
+- [x] Side column: deal and regulatory trackers (last 90 days, no duplicates) and the user's focus matches.
+- [x] An industry with no brief yet explains when the first one arrives.
+- [ ] A one-tap "Was this brief useful?" (yes/no) under the brief, recorded for the usefulness metric.
+
+### 11.3 Event tracker (Beta)
+**As a** student researching an industry, **I want** a searchable list of every tracked event with its source, **so that** I can find specific deals, approvals and launches.
+- [ ] The industry tabs from Briefing sit at the top and switch the list.
+- [ ] Table columns: date, company, event (summary), type, source link. Dates read "Sep 29".
+- [ ] Filters: event type, segment, date range and text search; filters combine and show the result count.
+- [ ] "Only my focus" shows events matching the user's focus, when one is set.
+- [ ] Pagination shows "Showing 1–25 of 143" with Previous/Next.
+- [ ] Export CSV downloads the current filters (up to 5,000 rows).
+- [ ] Each row has a Watch button for its company.
+- [ ] At 375px the table scrolls sideways inside its box, never the page.
+
+### 11.4 Companies (Beta)
+**As a** student targeting employers, **I want to** see which companies are most active and what each one does, **so that** I know the names to know and can watch the ones I care about.
+- [ ] A searchable list for the selected industry, ranked by momentum, with "what they do" and the last activity date.
+- [ ] "Watching only" shows the user's watched companies.
+- [ ] Watch / Watching toggles in one click and persists (up to 500 per user).
+- [ ] Clicking a company opens its profile: description, recent events with sources, filings, trials and hiring where available, and similar companies.
+- [ ] A company with little data says so instead of showing empty sections.
+
+### 11.5 Jobs: resumes and preferences (Jobs release)
+**As a** job seeker, **I want to** upload my resumes and say what roles I want, **so that** matches are scored against the right resume.
+- [ ] Upload PDF, Word (.docx) or text; at most 5 resumes; other files get a clear message.
+- [ ] Each resume can be mapped to the role types it's for; delete asks for confirmation.
+- [ ] Preferences: role types, locations (plus remote / remote only), seniority and industries, each a searchable multi-select.
+- [ ] "Your resume, job preferences and saved industries stay private to you" is shown here.
+
+### 11.6 Jobs: find and score (Jobs release)
+**As a** job seeker, **I want** roles from companies in my industries scored against my resume, **so that** I spend time on the best fits.
+- [ ] "Find jobs" shows "1 left today"; it's limited to once a day, and at the limit it says when it resets.
+- [ ] While running, a progress line shows the current step ("Scoring 12 of 40 jobs…"); leaving and returning keeps the progress.
+- [ ] Matches show a score badge, company, title, location and a "Top match" highlight on the best one; no seniority labels.
+- [ ] Filters: role type, location, industry; each job description is collapsible; "Open posting" opens the original.
+- [ ] Postings that closed or moved are marked as such.
+
+### 11.7 Jobs: tailor my resume (Jobs release)
+**As a** job seeker, **I want** specific suggestions to tailor my resume to a role, **so that** my application fits it.
+- [ ] "Tailor resume" on a job shows "24 of 30 left this month"; the text turns to warning at 80% used.
+- [ ] Results appear with progress while running (30–60 s); a job already tailored shows the saved advice without using a credit.
+- [ ] A failed tailoring is refunded if no paid call was made, and says so.
+- [ ] At the limit: "You've used all 30 resume tailorings this month. They reset on <date>."
+
+### 11.8 Account and privacy (Beta)
+**As a** user, **I want to** control my data, **so that** I can trust the app with my resume.
+- [ ] Account menu: display name, opt in or out of the daily brief email (off by default).
+- [ ] "Download my data" exports everything the user owns as JSON.
+- [ ] "Delete my account" asks for confirmation, then removes the account, private rows and files.
+- [ ] Terms and Privacy pages exist and are linked from sign-in.
+
+### 11.9 Operations (Beta)
+**As the** owner, **I want** the app to run without my laptop and alert me to problems, **so that** I can run it alongside school.
+- [ ] Web on Vercel, API and nightly worker on Render, production Supabase with migrations applied, all secrets in the host settings.
+- [ ] Sentry reports errors from the web app, API and worker.
+- [ ] Spend caps set in the Anthropic and Tavily consoles; budget alert at 80% reaches me.
+- [ ] The Google sign-in app is published (out of "Testing") so any umich account can sign in.
+- [ ] `analytics_events` records sign-up, industries chosen, brief opened, events opened, find jobs and tailor.
+
+---
+
+## 12. Launch plan
+
+| Stage | When | Who | What ships | Move on when |
+|---|---|---|---|---|
+| **Beta** | Dec 1 | 10–15 Ross classmates, invited by me | Briefing, Events, Companies; Consulting, PE and VC profiles; feedback form | Exit criteria below are met (target: about 2 weeks) |
+| **Jobs** | ~Dec 15 | Beta group first | Jobs (11.5–11.7) | No private-data or cost issues after one week of beta use |
+| **Ross launch** | After the beta exit criteria | Ross MBA community (club channels, class Slack) | Everything | — |
+
+**Beta exit criteria**
+- No open bug that exposes private data, shows a wrong source, or blocks sign-in.
+- At least 60% of beta users opened a brief in week 2 (early read on the north star).
+- Usefulness answers at least 70% yes, or a fix is shipped for the top complaint.
+- Nightly runs completed for every followed industry on at least 5 of the last 7 days.
+- Cost per active user on track for ≤ $1.50 per month.
+
+**Feedback loop:** a short form linked in the app (what's useful, what's missing, what's wrong), five 15-minute conversations with beta users in week 1, and a weekly look at the metrics in section 9. Every piece of feedback that leads to work becomes a GitHub issue.
+
+**Rollback:** each release is a merge to `main` that Vercel and Render deploy. If a release breaks sign-in, privacy or sources, I revert the merge, which redeploys the previous version, and tell beta users what happened.
+
+**Communication:** a personal invite to beta users explaining what it is, what's in the beta, and where to send feedback. For the Ross launch, a short post with a screenshot of a real brief and the privacy promise.
