@@ -34,7 +34,23 @@ export async function signOut(): Promise<void> {
 
 type Options = { method?: string; body?: unknown; signal?: AbortSignal };
 
-export async function api<T>(path: string, { method = "GET", body, signal }: Options = {}): Promise<T> {
+export async function api<T>(path: string, options: Options = {}): Promise<T> {
+  const res = await send(path, options);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+/** Download a file the API produces (e.g. CSV). A plain link can't send the sign-in token. */
+export async function download(path: string, filename: string): Promise<void> {
+  const blob = await (await send(path)).blob();
+  const url = URL.createObjectURL(blob);
+  const link = Object.assign(document.createElement("a"), { href: url, download: filename });
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Authenticated request; throws ApiError on failure and starts over at sign-in on 401. */
+async function send(path: string, { method = "GET", body, signal }: Options = {}): Promise<Response> {
   const token = await accessToken();
   if (!token) {
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -58,9 +74,8 @@ export async function api<T>(path: string, { method = "GET", body, signal }: Opt
     throw new ApiError(0, "network_error", "We couldn't reach Industry Radar. Check your connection and try again.");
   }
 
-  if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => null);
   if (!res.ok) {
+    const data = await res.json().catch(() => null);
     const err = data?.error ?? {};
     if (res.status === 401) {
       // Expired or invalid session: start over at sign-in
@@ -70,7 +85,7 @@ export async function api<T>(path: string, { method = "GET", body, signal }: Opt
     }
     throw new ApiError(res.status, err.code ?? "http_error", err.message ?? FALLBACK_MESSAGE, err.retry_after);
   }
-  return data as T;
+  return res;
 }
 
 /* Response shapes (api/routes/*.py) */
@@ -142,3 +157,6 @@ export type Brief = {
   focus: string | null;
   focus_events: FocusEvent[];
 };
+
+export type FilterOption = { value: string; count: number };
+export type EventFilterOptions = { types: FilterOption[]; segments: FilterOption[] };

@@ -8,7 +8,7 @@ export function SourceLink({ href, children, className }: { href: string; childr
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={cn("inline-flex items-center gap-1 font-medium text-teal no-underline hover:underline", className)}
+      className={cn("relative inline-flex items-center gap-1 font-medium text-teal no-underline hover:underline", className)}
     >
       {children}
       <ExternalLink size={13} strokeWidth={1.75} aria-hidden />

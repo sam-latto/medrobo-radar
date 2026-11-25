@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 export function IndustryTabs() {
   const { me, industryId, setIndustryId } = useSession();
   return (
-    <div className="-mx-4 flex items-end gap-1 overflow-x-auto overflow-y-hidden px-4 shadow-[inset_0_-1px_0_var(--color-border)] desk:mx-0 desk:px-0 print:hidden">
+    <div className="-mx-4 flex items-end gap-1 overflow-x-auto overflow-y-hidden px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden shadow-[inset_0_-1px_0_var(--color-border)] desk:mx-0 desk:px-0 print:hidden">
       <div role="group" aria-label="Industry" className="flex items-end gap-1">
         {me.subscriptions.map((s) => {
           const active = s.industry_id === industryId;

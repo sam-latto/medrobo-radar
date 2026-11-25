@@ -1,9 +1,11 @@
-"use client";
+import { BriefingScreen } from "./briefing-page";
 
-import { useSession } from "@/components/app-shell";
-import { BriefingView } from "./briefing-view";
+export const metadata = { title: "Briefing · Industry Radar" };
 
-export default function BriefingPage() {
-  const { industryId } = useSession();
-  return <BriefingView key={industryId} />;
+// Everything on this page loads in the browser from the API after sign-in, so there is
+// nothing to prerender for instant navigation; opt out of that dev-time check.
+export const instant = false;
+
+export default function Page() {
+  return <BriefingScreen />;
 }

@@ -208,13 +208,33 @@ def test_events_filters_paging_and_csv(env):
     assert research["items"] and {e["event_type"] for e in research["items"]} == {"research"}
     windowed = c.get("/api/v1/events", headers=auth(user),
                      params={**params, "from": "2026-09-01", "to": "2026-09-30", "page_size": 100}).json()
-    assert all("2026-09-01" <= e["date"] <= "2026-09-30" for e in windowed["items"])
+    assert all("2026-09-01" <= e["date"] <= "2026-09-30" for e in windowed["items"] if e["date"])
     # No industry given: only followed industries (none yet)
     assert c.get("/api/v1/events", headers=auth(user)).json()["total"] == 0
     csv = c.get("/api/v1/events.csv", headers=auth(user), params={"industry_id": "healthcare_robotics"})
     assert csv.headers["content-type"].startswith("text/csv")
     assert csv.text.splitlines()[0].startswith("date,industry,company")
     assert len(csv.text.splitlines()) == page["total"] + 1
+
+
+def test_event_filter_options_list_what_exists(env):
+    c, user = env["client"], env["new_user"]()
+    options = c.get("/api/v1/events/filters", headers=auth(user),
+                    params={"industry_id": "healthcare_robotics"}).json()
+    total = c.get("/api/v1/events", headers=auth(user), params={"industry_id": "healthcare_robotics"}).json()["total"]
+    assert options["types"] and sum(t["count"] for t in options["types"]) == total
+    assert [t["count"] for t in options["types"]] == sorted((t["count"] for t in options["types"]), reverse=True)
+    research = next(t for t in options["types"] if t["value"] == "research")
+    filtered = c.get("/api/v1/events", headers=auth(user),
+                     params={"industry_id": "healthcare_robotics", "type": "research"}).json()["total"]
+    assert research["count"] == filtered
+    assert options["segments"] and all(s["value"] for s in options["segments"])
+    # With a date range, counts match what the list shows for that range
+    window = {"industry_id": "healthcare_robotics", "from": "2026-09-01", "to": "2026-09-30"}
+    windowed = c.get("/api/v1/events/filters", headers=auth(user), params=window).json()
+    listed = c.get("/api/v1/events", headers=auth(user), params=window).json()["total"]
+    assert sum(t["count"] for t in windowed["types"]) == listed < total
+    assert c.get("/api/v1/events/filters", params={"industry_id": "healthcare_robotics"}).status_code == 401
 
 
 def test_companies_ranking_profile_and_watchlist(env):
@@ -560,3 +580,17 @@ def test_industry_request_keeps_existing_focus_and_cap(env):
     assert put.status_code == 200, put.json()
     r = c.post("/api/v1/industries/requests", headers=auth(user), json={"label": "Private equity buyouts"})
     assert r.status_code == 422 and r.json()["error"]["code"] == "too_many_industries", r.json()
+
+
+def test_undated_events_are_filtered_by_when_they_were_collected(env):
+    c, user, conn = env["client"], env["new_user"](), env["conn"]
+    url = "https://www.therobotreport.com/undated-event-test"
+    run = conn.execute("select id from public.pipeline_runs where industry_id = 'healthcare_robotics' limit 1").fetchone()
+    conn.execute("insert into public.events (run_id, industry_id, company, event_type, segment, summary, source_url, "
+                 "source_type, created_at) values (%s, 'healthcare_robotics', 'Undated Co', 'news', 'other', "
+                 "'An event with no date', %s, 'tavily', '2026-09-15')", (run["id"], url))
+    params = {"industry_id": "healthcare_robotics", "q": "Undated Co"}
+    inside = c.get("/api/v1/events", headers=auth(user), params={**params, "from": "2026-09-01", "to": "2026-09-30"})
+    outside = c.get("/api/v1/events", headers=auth(user), params={**params, "from": "2026-10-01"})
+    assert [e["date"] for e in inside.json()["items"]] == [None]  # shown, still marked as undated
+    assert outside.json()["total"] == 0
